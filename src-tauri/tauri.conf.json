@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Studio",
+  "version": "0.1.0",
+  "identifier": "com.davidstokarski.audiointerface",
+  "build": {
+    "beforeDevCommand": "npm run dev:next",
+    "beforeBuildCommand": "npm run build:next",
+    "devUrl": "http://localhost:3000",
+    "frontendDist": "../out"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Studio",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns"
+    ],
+    "category": "Music",
+    "shortDescription": "Real-time audio mixer + AU plugin host",
+    "longDescription": "Mix multi-channel audio inputs, apply AU plugins per channel, save and recall presets.",
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
+    "resources": ["binaries/audio_engine"]
+  },
+  "plugins": {}
+}

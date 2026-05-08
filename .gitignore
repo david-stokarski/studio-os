@@ -1,0 +1,20 @@
+# Node
+node_modules
+.next
+out
+dist
+*.log
+
+# Tauri
+src-tauri/target
+src-tauri/gen
+src-tauri/binaries
+
+# JUCE / CMake
+engine/build
+
+# Editor / OS
+.DS_Store
+.idea
+.vscode
+*.swp
