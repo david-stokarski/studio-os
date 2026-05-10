@@ -115,7 +115,7 @@ export function Knob({ value, min, max, defaultValue = 0, size = 36, onChange, c
         />
         {/* Pan arc — uses stroke-dasharray to draw a partial ring, rotated so
             the arc starts (or ends, for negative offsets) at 12 o'clock. */}
-        {showArc && (
+        {showArc ? (
           <circle
             cx={cx}
             cy={cy}
@@ -126,6 +126,16 @@ export function Knob({ value, min, max, defaultValue = 0, size = 36, onChange, c
             strokeLinecap="round"
             strokeDasharray={`${arcLength} ${circumference}`}
             transform={`rotate(${rotation} ${cx} ${cy})`}
+          />
+        ) : (
+          // At dead center: a small dot sitting on the ring at 12 o'clock.
+          // Sized to match the rounded end-cap the panning arc draws, so the
+          // visual is continuous as the user nudges off-center.
+          <circle
+            cx={cx}
+            cy={cy - r}
+            r={strokeWidth / 2}
+            fill="hsl(var(--foreground))"
           />
         )}
       </svg>

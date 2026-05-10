@@ -23,6 +23,11 @@ async fn engine_request(
 }
 
 #[tauri::command]
+fn restart_engine(state: State<'_, AppState>) -> Result<(), String> {
+    state.engine.restart()
+}
+
+#[tauri::command]
 fn list_presets() -> Result<Vec<String>, String> {
     let dir = preset_dir().map_err(|e| e.to_string())?;
     if !dir.exists() {
@@ -127,6 +132,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             engine_request,
+            restart_engine,
             list_presets,
             save_preset,
             load_preset,

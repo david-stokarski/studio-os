@@ -10,7 +10,7 @@ import { LevelMeter } from "@/components/level-meter";
 import { useAppStore } from "@/lib/store";
 import * as engine from "@/lib/engine";
 import { FADER_MIN_DB, linearToDb } from "@/lib/utils";
-import { VolumeX, Plus, X, Trash2, Power, GripVertical } from "lucide-react";
+import { VolumeX, Plus, X, Trash2, Power, GripVertical, LogIn, LogOut } from "lucide-react";
 import type { Track } from "@/lib/types";
 import { MAX_PLUGINS_PER_TRACK, MASTER_BUS_ID } from "@/lib/types";
 
@@ -315,7 +315,7 @@ export function TrackStripView({ track, onPickPlugin, onReorder }: Props) {
           onChange={(e) => setName(e.target.value)}
           onKeyDown={onNameKeyDown}
           onFocus={(e) => e.currentTarget.select()}
-          className="h-6 px-1.5 text-xs font-semibold"
+          className="h-6 min-w-0 flex-1 rounded-none border-0 bg-transparent px-1 text-xs font-semibold shadow-none focus-visible:ring-0"
         />
         <Button size="icon" variant="ghost" className="h-5 w-5" onClick={onRemove} title="Delete track">
           <Trash2 className="h-3 w-3" />
@@ -323,34 +323,47 @@ export function TrackStripView({ track, onPickPlugin, onReorder }: Props) {
       </div>
 
       {/* Routing dropdowns — no labels */}
-      <Select value={String(track.inputCh)} onValueChange={changeInput}>
-        <SelectTrigger className="h-6 px-1.5 text-[11px]" title="Input channel">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {inputOptions.map((i) => (
-            <SelectItem key={i} value={String(i)}>{`Ch ${i + 1}`}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <Select
-        value={!track.busId || track.busId === MASTER_BUS_ID ? "__master__" : track.busId}
-        onValueChange={changeBus}
-      >
-        <SelectTrigger className="h-6 px-1.5 text-[11px]" title="Route to">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__master__">Master</SelectItem>
-          {subBuses.map((b) => (
-            <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {/* Input channel — LogIn icon hints at "audio enters here". */}
+      <div className="flex items-center gap-1">
+        <LogIn className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
+        <Select value={String(track.inputCh)} onValueChange={changeInput}>
+          <SelectTrigger
+            className="h-6 min-w-0 flex-1 rounded-none border-0 bg-transparent px-0 text-[11px] shadow-none focus:ring-0 focus:ring-offset-0 [&>svg]:hidden"
+            title="Input channel"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {inputOptions.map((i) => (
+              <SelectItem key={i} value={String(i)}>{`Ch ${i + 1}`}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      {/* Routing target — LogOut icon hints at "audio leaves through here". */}
+      <div className="flex items-center gap-1">
+        <LogOut className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
+        <Select
+          value={!track.busId || track.busId === MASTER_BUS_ID ? "__master__" : track.busId}
+          onValueChange={changeBus}
+        >
+          <SelectTrigger
+            className="h-6 min-w-0 flex-1 rounded-none border-0 bg-transparent px-0 text-[11px] shadow-none focus:ring-0 focus:ring-offset-0 [&>svg]:hidden"
+            title="Route to"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__master__">Master</SelectItem>
+            {subBuses.map((b) => (
+              <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
 
       {/* Plugin chain */}
       <div className="flex flex-1 min-h-[80px] flex-col gap-1">
-        <div className="text-[10px] uppercase text-muted-foreground tracking-wider">Plugins</div>
         <div className="flex-1 min-h-0 overflow-y-auto rounded border border-border/50 bg-background/30 p-1">
           <div className="flex flex-col gap-0.5">
             {track.plugins.map((p, slot) => {

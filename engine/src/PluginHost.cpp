@@ -73,10 +73,34 @@ std::unique_ptr<juce::AudioPluginInstance> PluginHost::createInstance(const juce
                                                                      double sampleRate, int blockSize,
                                                                      juce::String& errorMessage)
 {
-    if (auto desc = knownList.getTypeForIdentifierString(identifierString))
+    auto desc = knownList.getTypeForIdentifierString(identifierString);
+    if (! desc)
     {
-        return formatManager.createPluginInstance(*desc, sampleRate, blockSize, errorMessage);
+        errorMessage = "Plugin not found: " + identifierString;
+        return nullptr;
     }
-    errorMessage = "Plugin not found: " + identifierString;
-    return nullptr;
+
+    // Guard against C++ exceptions thrown during AU instantiation. JUCE itself
+    // doesn't throw, but the plugin's own constructor (especially licensed AUs
+    // like SSL 360 or Slate Digital) can throw on missing daemons / activation
+    // failures. We can't catch a SIGSEGV from misbehaving native code — that
+    // still kills the engine — but at least the recoverable failures end up
+    // here as a clean error rather than taking the process down.
+    try
+    {
+        auto inst = formatManager.createPluginInstance(*desc, sampleRate, blockSize, errorMessage);
+        if (! inst && errorMessage.isEmpty())
+            errorMessage = "Plugin returned null instance";
+        return inst;
+    }
+    catch (const std::exception& e)
+    {
+        errorMessage = juce::String("Plugin threw during instantiation: ") + e.what();
+        return nullptr;
+    }
+    catch (...)
+    {
+        errorMessage = "Plugin threw an unknown exception during instantiation";
+        return nullptr;
+    }
 }
