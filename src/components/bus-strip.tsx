@@ -10,7 +10,7 @@ import { LevelMeter } from "@/components/level-meter";
 import { useAppStore } from "@/lib/store";
 import * as engine from "@/lib/engine";
 import { FADER_MIN_DB, linearToDb } from "@/lib/utils";
-import { VolumeX, Plus, X, Trash2, Power } from "lucide-react";
+import { VolumeX, Plus, X, Trash2, Power, LogOut } from "lucide-react";
 import type { Bus } from "@/lib/types";
 import { MAX_PLUGINS_PER_BUS } from "@/lib/types";
 
@@ -217,47 +217,51 @@ export function BusStripView({ bus, onPickPlugin, isMaster = false }: Props) {
 
   return (
     <div className={containerClass}>
-      <div className="flex items-center gap-1">
-        {isMaster ? (
-          // Master is a constant — just bold "MASTER" text, no editable input.
-          <div className="flex h-6 flex-1 items-center px-1.5 text-xs font-bold tracking-wider text-foreground">
-            MASTER
-          </div>
-        ) : (
-          <>
+      {isMaster ? (
+        <div className="px-1 py-0.5 text-xs font-bold tracking-wider text-red-500/90">
+          MAIN OUT
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center gap-1">
             <Input
               value={bus.name}
               onChange={(e) => setName(e.target.value)}
               onFocus={(e) => e.currentTarget.select()}
-              className="h-6 px-1.5 text-xs font-semibold"
+              className="h-6 min-w-0 flex-1 rounded-none border-0 bg-transparent px-1 text-xs font-semibold shadow-none focus-visible:ring-0"
             />
             <Button size="icon" variant="ghost" className="h-5 w-5" onClick={onRemove} title="Delete bus">
               <Trash2 className="h-3 w-3" />
             </Button>
-          </>
-        )}
-      </div>
-      <div className={subtitleClass}>
-        {isMaster ? "Output Bus" : `Bus · ${routedCount} track${routedCount === 1 ? "" : "s"}`}
-      </div>
+          </div>
+          <div className={subtitleClass}>
+            {`Bus · ${routedCount} track${routedCount === 1 ? "" : "s"}`}
+          </div>
+        </>
+      )}
 
       {/* Output routing — only the master bus picks physical output channels. */}
       {isMaster && (
-        <Select value={`${bus.outL},${bus.outR}`} onValueChange={changeOutput}>
-          <SelectTrigger className="h-6 px-1.5 text-[11px]" title="Output pair">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {outputPairs.map(([l, r]) => (
-              <SelectItem key={`${l},${r}`} value={`${l},${r}`}>{`${l + 1}/${r + 1}`}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-1">
+          <LogOut className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
+          <Select value={`${bus.outL},${bus.outR}`} onValueChange={changeOutput}>
+            <SelectTrigger
+              className="h-6 min-w-0 flex-1 rounded-none border-0 bg-transparent px-0 text-[11px] shadow-none focus:ring-0 focus:ring-offset-0 [&>svg]:hidden"
+              title="Output pair"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {outputPairs.map(([l, r]) => (
+                <SelectItem key={`${l},${r}`} value={`${l},${r}`}>{`${l + 1}/${r + 1}`}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       )}
 
       {/* Plugin chain */}
       <div className="flex flex-1 min-h-[80px] flex-col gap-1">
-        <div className="text-[10px] uppercase text-muted-foreground tracking-wider">Plugins</div>
         <div className="flex-1 min-h-0 overflow-y-auto rounded border border-border/50 bg-background/30 p-1">
           <div className="flex flex-col gap-0.5">
             {bus.plugins.map((p, slot) => {

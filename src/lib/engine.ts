@@ -77,6 +77,19 @@ export interface ScanProgress { current: number; total: number; name: string }
 export const onScanProgress = (cb: (p: ScanProgress) => void): Promise<UnlistenFn> =>
   listen<ScanProgress>("engine:scanProgress", e => cb(e.payload));
 
+// Fires when the Tauri shell detects the audio engine subprocess has died
+// (e.g. a plugin segfaulted during instantiation). The frontend's crash
+// handler kicks off the restart-and-replay flow.
+export const onEngineCrashed = (cb: (info: { cmd?: string }) => void): Promise<UnlistenFn> =>
+  listen<{ cmd?: string }>("engine:crashed", (e) => cb(e.payload ?? {}));
+
+// Sentinel returned by engine_request when the IPC pipe is broken.
+export const ENGINE_CRASHED_ERROR = "engine_crashed";
+export const isEngineCrashedError = (e: unknown) =>
+  typeof e === "string" ? e.includes(ENGINE_CRASHED_ERROR) : (e instanceof Error && e.message.includes(ENGINE_CRASHED_ERROR));
+
+export const restartEngine = () => invoke<void>("restart_engine");
+
 // ---------- presets ----------
 export const listPresets   = () => invoke<string[]>("list_presets");
 export const savePresetFs  = (name: string, data: Preset) => invoke("save_preset", { name, data });

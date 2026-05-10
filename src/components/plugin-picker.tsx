@@ -18,7 +18,10 @@ interface Props {
 }
 
 export function PluginPicker({ open, target, onClose }: Props) {
-  const { plugins, setPlugins, tracks, buses, patchTrack, patchBus } = useAppStore();
+  const {
+    plugins, setPlugins, tracks, buses, patchTrack, patchBus,
+    blacklistedPlugins, setLastPluginAttempt,
+  } = useAppStore();
   const [filter, setFilter] = useState("");
   const [scanning, setScanning] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -41,15 +44,17 @@ export function PluginPicker({ open, target, onClose }: Props) {
 
   const filtered = useMemo(() => {
     const f = filter.toLowerCase();
+    const blacklist = new Set(blacklistedPlugins);
     return plugins
       .filter((p) => !p.isInstrument)
+      .filter((p) => !blacklist.has(p.id))
       .filter((p) =>
         !f ||
         p.name.toLowerCase().includes(f) ||
         p.manufacturer.toLowerCase().includes(f) ||
         p.category.toLowerCase().includes(f)
       );
-  }, [plugins, filter]);
+  }, [plugins, filter, blacklistedPlugins]);
 
   const targetLabel = (() => {
     if (!target) return "";
@@ -64,6 +69,15 @@ export function PluginPicker({ open, target, onClose }: Props) {
   const pick = async (id: string, name: string) => {
     if (!target) return;
     setBusy(id);
+    // Record what we're attempting so the global crash handler can identify
+    // the offending plugin if the engine dies during instantiation.
+    setLastPluginAttempt({
+      kind: target.kind,
+      targetId: target.kind === "track" ? target.trackId : target.busId,
+      slot: target.slot,
+      pluginId: id,
+      pluginName: name,
+    });
     try {
       if (target.kind === "track") {
         await engine.loadPlugin(target.trackId, target.slot, id);
@@ -82,9 +96,17 @@ export function PluginPicker({ open, target, onClose }: Props) {
           patchBus(target.busId, { plugins: next });
         }
       }
+      setLastPluginAttempt(null);
       onClose();
     } catch (e) {
-      alert(`Failed to load plugin: ${e}`);
+      // Engine crashes are handled by the global crash recovery flow which
+      // surfaces its own UI; suppress this picker's generic alert for them.
+      if (engine.isEngineCrashedError(e)) {
+        onClose();
+      } else {
+        setLastPluginAttempt(null);
+        alert(`Failed to load plugin: ${e}`);
+      }
     } finally {
       setBusy(null);
     }
