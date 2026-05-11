@@ -102,34 +102,70 @@
       monospace;
   }
 
-  /* ---------- Console (DAW classic) ----------
-   * Mid studio grey background like Logic / Ableton mixer chrome, slightly
-   * cool, with a teal-blue channel-strip accent. Medium radius — softer
-   * than industrial, firmer than minimal.
+  /* ---------- Console (Neve-style physical mixer) ----------
+   * Modeled on classic Neve consoles (1073/8068/8078 era):
+   *   - Chassis painted in BS381C 633 RAF Blue/Grey (#424c53), or the later
+   *     BS381C 640 Extra Dark Sea Grey (#566164) — we use the latter for
+   *     panels since it reads better as a UI background.
+   *   - Cream "marshmallow" Marconi-style knobs with a red indicator line.
+   *   - White silkscreen labels.
+   *   - Real Phillips screws in the corners of every panel.
+   *   - Subtle painted-aluminum grain on the surfaces.
+   *
+   * This palette only carries the colors; the realism (screws, panel
+   * texture, knob caps, chrome fader thumbs) is painted by the rules
+   * further down under `[data-theme="console"] ...`.
    */
   [data-theme="console"] {
-    --background: 220 8% 18%;
-    --foreground: 210 14% 90%;
-    --card: 220 7% 24%;
-    --card-foreground: 210 14% 92%;
-    --popover: 220 8% 20%;
-    --popover-foreground: 210 14% 92%;
-    --primary: 195 65% 58%;
-    --primary-foreground: 220 30% 10%;
-    --secondary: 220 7% 30%;
-    --secondary-foreground: 210 14% 92%;
-    --muted: 220 7% 28%;
-    --muted-foreground: 215 10% 70%;
-    --accent: 195 65% 58%;
-    --accent-foreground: 220 30% 10%;
-    --destructive: 0 70% 52%;
+    /* Chassis hue: warm dark, leaning toward worn wood/leather rather than
+       cold studio grey. Provides the backdrop the mixer sits inside. */
+    --background: 25 18% 10%;
+    --foreground: 40 16% 94%;             /* warm white silkscreen */
+    --card: 195 7% 38%;                   /* Marinair Extra Dark Sea Grey panel */
+    --card-foreground: 40 16% 96%;
+    --popover: 25 14% 14%;
+    --popover-foreground: 40 16% 94%;
+    --primary: 357 72% 47%;               /* Neve red — emphasis, master trim */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 205 9% 20%;              /* recessed inset */
+    --secondary-foreground: 40 16% 94%;
+    --muted: 205 9% 22%;
+    --muted-foreground: 40 8% 78%;
+    /* Accent is the *hover/focus* surface — kept warm-neutral so hovering a
+       button doesn't suddenly explode into Neve red. Primary stays red for
+       emphasis; accent is the gentle "raise" tone for interactive feedback. */
+    --accent: 30 8% 30%;
+    --accent-foreground: 40 16% 94%;
+    --destructive: 5 72% 50%;
     --destructive-foreground: 0 0% 98%;
-    --border: 220 6% 34%;
-    --input: 220 6% 34%;
-    --ring: 195 65% 58%;
-    --radius: 0.375rem;
-    --ui-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    --border: 205 12% 7%;                 /* near-black panel edge */
+    --input: 205 9% 18%;
+    --ring: 357 72% 47%;
+    --radius: 0.25rem;
+    --ui-font: ui-sans-serif, system-ui, -apple-system, "Segoe UI",
       "Helvetica Neue", sans-serif;
+    /* These vars feed the painted realism below. Centralised so a single
+       palette change ripples through the whole console look. */
+    --console-knob-cap-light: #fcf6dc;
+    --console-knob-cap-mid: #ecdfb1;
+    --console-knob-cap-shadow: #a8956a;
+    --console-knob-cap-rim: #5e5234;
+    --console-knob-indicator: #aa1c20;
+    --console-knob-indicator-glow: #d22a2f;
+    --console-knob-label: #2a2110;
+    --console-fader-thumb-light: #cfd2d6;
+    --console-fader-thumb-mid: #7a7d82;
+    --console-fader-thumb-dark: #2c2e31;
+    /* Real-world materials painted into the frame around the mixer.
+       Cherry/teak wood for the side cheeks, dark tan leather for the
+       palm rest. */
+    --console-wood-light: #3d2515;
+    --console-wood-mid: #2a1a0e;
+    --console-wood-dark: #160d07;
+    --console-leather-light: #2d1f15;
+    --console-leather-mid: #1c1209;
+    --console-leather-dark: #0d0805;
+    --console-stitching: #c39a5a;
   }
 }
 
@@ -144,4 +180,490 @@
     user-select: none;
   }
   input, [contenteditable] { -webkit-user-select: text; user-select: text; }
+}
+
+/* ============================================================
+ * Console theme — Neve-style physical mixer realism.
+ *
+ * Everything below is painted procedurally with SVG data URLs and CSS
+ * gradients — no external image assets, no licensing concerns. The
+ * effect is layered:
+ *
+ *   1. Chassis backdrop with overhead room light + corner vignette
+ *   2. Marinair-grey panels with painted-aluminum grain, top sheen,
+ *      bottom shadow, beveled box-shadow, and a Phillips screw in
+ *      every corner
+ *   3. Inset recessed surfaces for buttons / plugin pills
+ *   4. Chrome cap on the fader thumb
+ *
+ * The Knob component switches to a Neve-style top-down render in JS
+ * when this theme is active (see knob.tsx). The variables defined in
+ * the palette block above feed both the CSS rules below and the
+ * SVG rendering inside the Knob.
+ * ============================================================ */
+
+[data-theme="console"] {
+  /* Reusable SVG building blocks. Defining once and referencing via
+     var() avoids duplicating long base64-style strings in every rule. */
+
+  /* A Phillips-head screw — used four times per panel.
+     %23 = '#'; %25 = '%'. Encoded inline so the URL parser is happy. */
+  --console-screw:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'><defs><radialGradient id='s' cx='34%25' cy='28%25' r='75%25'><stop offset='0%25' stop-color='%23c9c9ca'/><stop offset='55%25' stop-color='%236d6e70'/><stop offset='100%25' stop-color='%23191a1c'/></radialGradient></defs><circle cx='6' cy='6' r='5.4' fill='url(%23s)' stroke='%230d0e10' stroke-width='0.5'/><circle cx='6' cy='6' r='5.4' fill='none' stroke='%23000' stroke-opacity='0.55' stroke-width='0.4' transform='translate(0 0.4)'/><line x1='6' y1='2.1' x2='6' y2='9.9' stroke='%230b0c0d' stroke-width='1.1' stroke-linecap='round'/><line x1='2.1' y1='6' x2='9.9' y2='6' stroke='%230b0c0d' stroke-width='1.1' stroke-linecap='round'/><line x1='6' y1='2.4' x2='6' y2='3.4' stroke='%23dadbdc' stroke-width='0.45' stroke-linecap='round'/><line x1='3.6' y1='6' x2='2.4' y2='6' stroke='%23dadbdc' stroke-width='0.45' stroke-linecap='round'/></svg>");
+
+  /* Painted-aluminum grain — fine fractal noise, low alpha. */
+  --console-grain:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.07 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+
+  /* Coarser chassis grain, slightly darker for the body backdrop. */
+  --console-chassis-grain:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.95' numOctaves='1' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.05 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+
+  /* Wood grain — anisotropic noise (low X freq, high Y freq) gives vertical
+     "grain stripes" running top-to-bottom, like a wooden side cheek. The
+     colour tinting comes through feColorMatrix mapping black noise into the
+     warm brown range. */
+  --console-wood-grain:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='80' height='400'><filter id='w'><feTurbulence type='fractalNoise' baseFrequency='0.04 0.55' numOctaves='3' seed='5' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.22   0 0 0 0 0.10   0 0 0 0 0.04   0 0 0 0.85 0'/></filter><rect width='100%25' height='100%25' filter='url(%23w)'/></svg>");
+
+  /* Leather grain — irregular pitted/cracked pattern. Medium baseFrequency,
+     a few octaves, no anisotropy. Tinted dark warm brown. */
+  --console-leather-grain:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='320' height='160'><filter id='l'><feTurbulence type='fractalNoise' baseFrequency='0.55' numOctaves='3' seed='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.10   0 0 0 0 0.06   0 0 0 0 0.03   0 0 0 0.75 0'/></filter><rect width='100%25' height='100%25' filter='url(%23l)'/></svg>");
+}
+
+/* ----- chassis backdrop -----
+ *
+ * The mixer floats inside a wooden cabinet sitting on a leather palm rest.
+ * Layered:
+ *   body backdrop:    worn dark warm chassis with overhead light vignette
+ *   body::before:     left + right wood side cheeks (fixed, full height)
+ *   body::after:      leather palm rest along the bottom (fixed)
+ *
+ * The mixer container itself is shrunk by 36px vertically and given wider
+ * horizontal padding so the frame is visible without overlapping content.
+ */
+[data-theme="console"] body {
+  background-color: hsl(var(--background));
+  background-image:
+    /* warm overhead room light */
+    radial-gradient(ellipse 90% 50% at 50% -8%,
+      hsla(35, 35%, 35%, 0.18) 0%,
+      transparent 65%),
+    /* deeper corner vignette */
+    radial-gradient(ellipse 130% 70% at 50% 110%,
+      hsla(0, 0%, 0%, 0.55) 0%,
+      transparent 65%),
+    /* fine grain */
+    var(--console-chassis-grain);
+}
+
+/* Make room for the wood frame + leather palm rest. The mixer's h-screen
+ * normally takes the full viewport; we trim 36px off the bottom and add
+ * horizontal slack for the side cheeks. */
+[data-theme="console"] body > div.h-screen.p-3 {
+  height: calc(100vh - 36px) !important;
+  padding-left: 22px !important;
+  padding-right: 22px !important;
+  padding-bottom: 8px !important;
+}
+
+/* ----- wood side cheeks -----
+ * A single fixed full-height layer; the linear gradient paints wood only at
+ * the outer 18px on each side and leaves the middle transparent so the
+ * mixer shows through. */
+[data-theme="console"] body::before {
+  content: "";
+  position: fixed;
+  top: 0;
+  bottom: 36px;       /* don't overlap the palm rest */
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-color: transparent;
+  background-image:
+    /* wood grain texture, scoped to the cheek regions by the gradient mask */
+    var(--console-wood-grain),
+    var(--console-wood-grain),
+    /* the actual wood shape: solid colour at edges, transparent middle.
+       We layer two stops per side so each cheek has a darkened outer edge
+       (the corner of the cabinet) softening to a lighter centre. */
+    linear-gradient(90deg,
+      var(--console-wood-dark) 0,
+      var(--console-wood-light) 6px,
+      var(--console-wood-mid) 14px,
+      var(--console-wood-dark) 18px,
+      transparent 18px,
+      transparent calc(100% - 18px),
+      var(--console-wood-dark) calc(100% - 18px),
+      var(--console-wood-mid) calc(100% - 14px),
+      var(--console-wood-light) calc(100% - 6px),
+      var(--console-wood-dark) 100%);
+  background-position:
+    0 0,
+    100% 0,
+    0 0;
+  background-size:
+    18px 100%,
+    18px 100%,
+    100% 100%;
+  background-repeat:
+    repeat-y,
+    repeat-y,
+    no-repeat;
+  /* Slight inner shadow on the cheek's inside edge — gives a "the panel is
+     mounted into the wood frame" depth cue. */
+  box-shadow: inset 18px 0 12px -10px hsla(0, 0%, 0%, 0.55),
+              inset -18px 0 12px -10px hsla(0, 0%, 0%, 0.55);
+}
+
+/* ----- leather palm rest -----
+ * Fixed strip across the bottom of the viewport. Layered:
+ *   - leather grain (fractal noise tinted brown)
+ *   - a glossy top sheen so the wrist rest catches light
+ *   - a dark base
+ *   - a thin saddle-stitched line at the very top, like real upholstered
+ *     consoles ("Neumann" / "Quad-Eight" cushioned palm rests)
+ *
+ * The stitch is painted via repeating-linear-gradient (dash pattern). */
+[data-theme="console"] body::after {
+  content: "";
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  pointer-events: none;
+  z-index: 1;
+  background-color: var(--console-leather-mid);
+  background-image:
+    /* top sheen — light catching the wrist rest's curve */
+    linear-gradient(180deg,
+      hsla(35, 35%, 45%, 0.20) 0%,
+      transparent 35%,
+      hsla(0, 0%, 0%, 0.45) 100%),
+    /* leather grain (tinted noise) */
+    var(--console-leather-grain),
+    /* base tonal gradient */
+    linear-gradient(180deg,
+      var(--console-leather-light) 0%,
+      var(--console-leather-mid) 40%,
+      var(--console-leather-dark) 100%);
+  background-size: 100% 100%, 320px 160px, 100% 100%;
+  background-repeat: no-repeat, repeat, no-repeat;
+  box-shadow:
+    inset 0 1px 0 hsla(35, 35%, 45%, 0.25),
+    inset 0 -1px 0 hsla(0, 0%, 0%, 0.65),
+    inset 0 8px 8px -8px hsla(0, 0%, 0%, 0.65),
+    0 -2px 6px hsla(0, 0%, 0%, 0.55);
+}
+
+/* Saddle-stitching across the top of the palm rest. Implemented as a fixed
+ * 1px-tall element using ::after of html (we've already used body::after).
+ * The stitch is a dashed pattern in cream/tan that reads as real thread.
+ * Positioned just above the leather strip. */
+[data-theme="console"]::after {
+  content: "";
+  position: fixed;
+  left: 22px;        /* line up with the wood cheek inner edge */
+  right: 22px;
+  bottom: 32px;      /* 4px in from the top of the palm rest */
+  height: 1px;
+  pointer-events: none;
+  z-index: 2;
+  background:
+    repeating-linear-gradient(90deg,
+      var(--console-stitching) 0px,
+      var(--console-stitching) 5px,
+      transparent 5px,
+      transparent 10px);
+  opacity: 0.55;
+  filter: drop-shadow(0 1px 0 hsla(0, 0%, 0%, 0.8));
+}
+
+/* ----- Marinair-grey channel-strip / dialog panels -----
+ *
+ * Background layers (top to bottom):
+ *   - 4 corner screws
+ *   - paint grain
+ *   - top sheen + bottom shadow gradient
+ *   - flat panel color (from --card)
+ *
+ * The bevel comes from inset box-shadows (highlight on top edge, shadow
+ * on bottom) plus a soft drop-shadow so the panel reads as separate from
+ * the chassis behind it.
+ *
+ * Padding is bumped slightly to make room for the screws — the four
+ * corners need ~10px of clearance so the screws don't crash into content.
+ */
+[data-theme="console"] .bg-card {
+  background-color: hsl(var(--card));
+  background-image:
+    var(--console-screw),
+    var(--console-screw),
+    var(--console-screw),
+    var(--console-screw),
+    var(--console-grain),
+    linear-gradient(180deg,
+      hsla(40, 25%, 78%, 0.12) 0%,
+      transparent 14%,
+      transparent 86%,
+      hsla(0, 0%, 0%, 0.32) 100%);
+  background-position:
+    5px 5px,
+    calc(100% - 5px) 5px,
+    5px calc(100% - 5px),
+    calc(100% - 5px) calc(100% - 5px),
+    0 0,
+    0 0;
+  background-size:
+    9px 9px, 9px 9px, 9px 9px, 9px 9px,
+    200px 200px,
+    100% 100%;
+  background-repeat:
+    no-repeat, no-repeat, no-repeat, no-repeat,
+    repeat,
+    no-repeat;
+  box-shadow:
+    inset 0 1px 0 hsla(40, 30%, 65%, 0.22),
+    inset 0 -1px 0 hsla(0, 0%, 0%, 0.45),
+    inset 1px 0 0 hsla(40, 25%, 60%, 0.10),
+    inset -1px 0 0 hsla(0, 0%, 0%, 0.30),
+    0 2px 5px hsla(0, 0%, 0%, 0.55),
+    0 0 0 1px hsla(0, 0%, 0%, 0.45);
+  border-color: transparent;
+}
+
+/* ----- recessed inset surfaces (buttons, plugin pills, plugin chain box) -----
+ * These read as "milled into" the panel: dark top edge, soft highlight on the
+ * bottom edge — opposite bevel from the panel itself. */
+[data-theme="console"] .bg-secondary,
+[data-theme="console"] [class*=" bg-secondary"],
+[data-theme="console"] [class^="bg-secondary"] {
+  background-color: hsl(var(--secondary));
+  background-image: linear-gradient(180deg,
+    hsla(0, 0%, 0%, 0.32) 0%,
+    transparent 35%,
+    transparent 65%,
+    hsla(40, 20%, 55%, 0.05) 100%);
+  box-shadow:
+    inset 0 1px 1px hsla(0, 0%, 0%, 0.45),
+    inset 0 -1px 0 hsla(40, 20%, 55%, 0.10);
+}
+
+/* ----- fader thumb: chrome cap (P&G-style) -----
+ *
+ * The Fader component adds the .console-fader-thumb class when the console
+ * theme is active. Without theme detection in CSS-only land we rely on the
+ * theme attribute selector to upgrade the styling.
+ *
+ * The thumb is a small horizontal cap sitting on a vertical track. Real
+ * P&G faders have a chrome-finish cap — we layer two gradients to fake it:
+ * a vertical chrome sheen (light at center, darker at edges) and a top
+ * highlight + bottom shadow. */
+[data-theme="console"] .console-fader-thumb {
+  height: 14px !important;
+  width: 22px !important;
+  border-radius: 2px !important;
+  border: 1px solid hsla(0, 0%, 0%, 0.7) !important;
+  background:
+    linear-gradient(180deg,
+      hsla(0, 0%, 100%, 0.45) 0%,
+      transparent 35%,
+      transparent 65%,
+      hsla(0, 0%, 0%, 0.40) 100%),
+    linear-gradient(90deg,
+      var(--console-fader-thumb-dark) 0%,
+      var(--console-fader-thumb-mid) 18%,
+      var(--console-fader-thumb-light) 50%,
+      var(--console-fader-thumb-mid) 82%,
+      var(--console-fader-thumb-dark) 100%) !important;
+  box-shadow:
+    inset 0 1px 0 hsla(0, 0%, 100%, 0.55),
+    inset 0 -1px 0 hsla(0, 0%, 0%, 0.55),
+    0 1px 2px hsla(0, 0%, 0%, 0.65) !important;
+}
+[data-theme="console"] .console-fader-thumb::before {
+  /* The single grip line on the cap. Two short black lines either side
+     of a slim red center stripe — the Neve fader cap detail. */
+  left: 4px !important;
+  right: 4px !important;
+  background: linear-gradient(90deg,
+    hsla(0, 0%, 0%, 0.6) 0%,
+    hsla(0, 0%, 0%, 0.6) 35%,
+    hsl(var(--primary)) 35%,
+    hsl(var(--primary)) 65%,
+    hsla(0, 0%, 0%, 0.6) 65%,
+    hsla(0, 0%, 0%, 0.6) 100%) !important;
+  height: 2px !important;
+}
+
+/* The fader track — slightly recessed dark slot. */
+[data-theme="console"] .console-fader-track {
+  background-color: hsla(0, 0%, 0%, 0.45) !important;
+  background-image: linear-gradient(90deg,
+    hsla(0, 0%, 0%, 0.6) 0%,
+    transparent 30%,
+    transparent 70%,
+    hsla(0, 0%, 0%, 0.6) 100%) !important;
+  box-shadow:
+    inset 1px 0 1px hsla(0, 0%, 0%, 0.65),
+    inset -1px 0 1px hsla(0, 0%, 0%, 0.65),
+    inset 0 1px 0 hsla(40, 25%, 60%, 0.08) !important;
+}
+
+/* ----- bus strips: same Marinair panel as channel strips -----
+ * Bus strips use red/amber tinted backgrounds in flat themes to indicate
+ * master vs sub-bus. Under the console theme we replace the tint with the
+ * full panel treatment (screws, grain, sheen) and keep the border as a
+ * thin coloured edge, like a master-section badge on a real console. */
+[data-theme="console"] [data-bus-strip="true"] {
+  background-color: hsl(var(--card)) !important;
+  background-image:
+    var(--console-screw),
+    var(--console-screw),
+    var(--console-screw),
+    var(--console-screw),
+    var(--console-grain),
+    linear-gradient(180deg,
+      hsla(40, 25%, 78%, 0.12) 0%,
+      transparent 14%,
+      transparent 86%,
+      hsla(0, 0%, 0%, 0.32) 100%) !important;
+  background-position:
+    5px 5px,
+    calc(100% - 5px) 5px,
+    5px calc(100% - 5px),
+    calc(100% - 5px) calc(100% - 5px),
+    0 0,
+    0 0 !important;
+  background-size:
+    9px 9px, 9px 9px, 9px 9px, 9px 9px,
+    200px 200px,
+    100% 100% !important;
+  background-repeat:
+    no-repeat, no-repeat, no-repeat, no-repeat,
+    repeat,
+    no-repeat !important;
+  box-shadow:
+    inset 0 1px 0 hsla(40, 30%, 65%, 0.22),
+    inset 0 -1px 0 hsla(0, 0%, 0%, 0.45),
+    0 2px 5px hsla(0, 0%, 0%, 0.55),
+    0 0 0 1px hsla(0, 0%, 0%, 0.45);
+}
+/* Master gets a deeper red edge — the "master section" callout you see on
+ * Neve consoles (red trim around the main bus). */
+[data-theme="console"] [data-bus-strip="true"][data-bus-master="true"] {
+  box-shadow:
+    inset 0 0 0 2px hsl(var(--primary)),
+    inset 0 1px 0 hsla(40, 30%, 65%, 0.22),
+    inset 0 -1px 0 hsla(0, 0%, 0%, 0.45),
+    0 2px 5px hsla(0, 0%, 0%, 0.55),
+    0 0 0 1px hsla(0, 0%, 0%, 0.55) !important;
+}
+
+/* ----- pushbuttons -----
+ *
+ * On a real console the buttons are illuminated square pushbutton caps.
+ * In the off state they read as raised matte plastic; when active they
+ * light up like a colored LED. The CSS below treats each Tailwind variant
+ * as a different "kind" of cap:
+ *
+ *   bg-destructive (mute on)        — red LED
+ *   bg-primary     (Add Track, etc.) — red LED (primary action)
+ *   bg-amber-500   (solo on)         — amber/yellow LED
+ *   outline / ghost (off states)     — neutral raised cap; hover uses the
+ *                                       neutral --accent color (NOT red),
+ *                                       set in the palette block above
+ *
+ * Selectors use `[class~="X"]` (whole-word match) so we don't accidentally
+ * style buttons that just *mention* "primary" via foreground colors. */
+
+/* Shared illuminated-LED treatment. Color comes from a `--led-hue` set per
+ * variant block below, so this stays DRY. */
+[data-theme="console"] button[class~="bg-destructive"],
+[data-theme="console"] button[class~="bg-primary"] {
+  --led-h: 357;
+  --led-s: 75%;
+  --led-bright: 65%;
+}
+[data-theme="console"] button[class~="bg-amber-500"] {
+  --led-h: 38;
+  --led-s: 95%;
+  --led-bright: 60%;
+}
+[data-theme="console"] button[class~="bg-destructive"],
+[data-theme="console"] button[class~="bg-primary"],
+[data-theme="console"] button[class~="bg-amber-500"] {
+  background-image:
+    radial-gradient(ellipse at 50% 28%,
+      hsla(var(--led-h), 100%, calc(var(--led-bright) + 15%), 0.55) 0%,
+      transparent 65%),
+    linear-gradient(180deg,
+      hsla(0, 0%, 100%, 0.22) 0%,
+      transparent 50%,
+      hsla(0, 0%, 0%, 0.35) 100%);
+  box-shadow:
+    inset 0 1px 0 hsla(var(--led-h), 100%, 80%, 0.55),
+    inset 0 -1px 0 hsla(var(--led-h), 50%, 18%, 0.55),
+    0 0 8px hsla(var(--led-h), var(--led-s), var(--led-bright), 0.65),
+    0 0 2px hsla(var(--led-h), var(--led-s), var(--led-bright), 0.85),
+    0 1px 2px hsla(0, 0%, 0%, 0.55);
+  text-shadow: 0 0 6px hsla(var(--led-h), 100%, 85%, 0.6);
+  /* Hover lifts brightness a touch — feels like pressing harder on a
+     mechanical key, not a sudden color change. */
+  transition: filter 120ms ease, box-shadow 120ms ease;
+}
+[data-theme="console"] button[class~="bg-destructive"]:hover,
+[data-theme="console"] button[class~="bg-primary"]:hover,
+[data-theme="console"] button[class~="bg-amber-500"]:hover {
+  filter: brightness(1.08);
+}
+
+/* Off-state buttons: raised matte cap. Outline (M / S off) and ghost
+ * (drag handle, settings cog) both use the same look. Hover uses the
+ * neutral warm grey accent, so nothing surprises with sudden red. */
+[data-theme="console"] button[class~="border-input"],
+[data-theme="console"] button[class~="hover:bg-accent"] {
+  background-image: linear-gradient(180deg,
+    hsla(40, 20%, 70%, 0.08) 0%,
+    transparent 50%,
+    hsla(0, 0%, 0%, 0.32) 100%);
+  box-shadow:
+    inset 0 1px 0 hsla(40, 25%, 70%, 0.16),
+    inset 0 -1px 0 hsla(0, 0%, 0%, 0.45),
+    0 1px 1px hsla(0, 0%, 0%, 0.40);
+  transition: filter 120ms ease, box-shadow 120ms ease;
+}
+[data-theme="console"] button[class~="border-input"]:hover,
+[data-theme="console"] button[class~="hover:bg-accent"]:hover {
+  filter: brightness(1.12);
+  box-shadow:
+    inset 0 1px 0 hsla(40, 25%, 70%, 0.25),
+    inset 0 -1px 0 hsla(0, 0%, 0%, 0.55),
+    0 1px 2px hsla(0, 0%, 0%, 0.50);
+}
+/* Pressed state: invert the bevel so the cap reads as "pushed in". */
+[data-theme="console"] button[class~="border-input"]:active,
+[data-theme="console"] button[class~="hover:bg-accent"]:active {
+  box-shadow:
+    inset 0 1px 2px hsla(0, 0%, 0%, 0.55),
+    inset 0 -1px 0 hsla(40, 25%, 70%, 0.12);
+  filter: brightness(0.96);
+}
+
+/* ----- plugin pills: small inset name plates -----
+ * Already styled by the .bg-secondary rule above. Just nudge the border-radius
+ * down slightly so they read as engraved plates rather than soft pills. */
+[data-theme="console"] [data-plugin-pill="true"] {
+  border-radius: 2px;
+}
+
+/* ----- text accents -----
+ * Section labels (MAIN OUT etc.) get a subtle silkscreen-ink look:
+ * crisp white with a faint dark shadow so they look painted on. */
+[data-theme="console"] .text-red-500,
+[data-theme="console"] [class*="text-red-500"] {
+  text-shadow: 0 0 4px hsla(355, 90%, 55%, 0.45);
 }

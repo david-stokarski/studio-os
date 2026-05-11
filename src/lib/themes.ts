@@ -55,8 +55,8 @@ export const THEMES: ThemeMeta[] = [
     label: "Console",
     mode: "dark",
     description:
-      "Inspired by classic DAW mixers (Logic, Ableton). Warm studio greys with a teal-blue channel-strip accent.",
-    swatch: ["#2a2d33", "#3a3e46", "#4eb8d9", "#dfe3e8"],
+      "A vintage Neve-style mixing console. Marinair grey panels, cream marshmallow knobs with red indicator lines, real screws.",
+    swatch: ["#1a1d1f", "#566164", "#b71d22", "#ecdfb1"],
   },
 ];
 

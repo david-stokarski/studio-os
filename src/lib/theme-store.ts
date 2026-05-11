@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { create } from "zustand";
 import {
   DEFAULT_THEME,
@@ -39,3 +40,19 @@ export const useThemeStore = create<ThemeState>((set) => ({
     set({ theme: t });
   },
 }));
+
+// Hydration-safe theme accessor.
+//
+// The static-export build inlines DEFAULT_THEME into the prerendered HTML
+// because there's no localStorage at build time. On the client the store's
+// initial value comes from localStorage, which can differ. Components that
+// branch on the active theme (e.g. Knob, Fader) must therefore render the
+// SSR-default first, then re-render with the real theme after hydration —
+// otherwise React reports a hydration mismatch and we get a flash of broken
+// markup.
+export function useActiveTheme(): ThemeId {
+  const theme = useThemeStore((s) => s.theme);
+  const [hydrated, setHydrated] = useState(false);
+  useEffect(() => setHydrated(true), []);
+  return hydrated ? theme : DEFAULT_THEME;
+}
