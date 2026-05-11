@@ -216,7 +216,7 @@ export function BusStripView({ bus, onPickPlugin, isMaster = false }: Props) {
   };
 
   return (
-    <div className={containerClass}>
+    <div data-bus-strip="true" data-bus-master={isMaster ? "true" : undefined} className={containerClass}>
       {isMaster ? (
         <div className="px-1 py-0.5 text-xs font-bold tracking-wider text-red-500/90">
           MAIN OUT
