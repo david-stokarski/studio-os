@@ -10,7 +10,7 @@ export async function engineRequest<T = unknown>(cmd: string, args?: unknown): P
 export const listDevices = () => engineRequest<AudioDevicesInfo>("listAudioDevices");
 
 export const setDevice = (input: string, output: string, sampleRate: number, bufferSize: number, numInputChannels: number) =>
-  engineRequest<{ sampleRate: number; bufferSize: number; numActiveInputs: number; numActiveOutputs: number }>(
+  engineRequest<{ sampleRate: number; bufferSize: number; numActiveInputs: number; numActiveOutputs: number; inputLatencySamples: number; outputLatencySamples: number }>(
     "setAudioDevice",
     { input, output, sampleRate, bufferSize, numInputChannels }
   );
@@ -23,6 +23,9 @@ export const removeTrack    = (id: string) => engineRequest("removeTrack",   { i
 export const setTrackInput  = (id: string, inputCh: number) => engineRequest("setTrackInput",  { id, inputCh });
 export const setTrackOutput = (id: string, outL: number, outR: number) => engineRequest("setTrackOutput", { id, outL, outR });
 export const setTrackBus    = (id: string, busId: string)   => engineRequest("setTrackBus",    { id, busId });
+export const setTrackDest   = (id: string, dest: "bus" | "out") => engineRequest("setTrackDest", { id, dest });
+export const setTrackInputMode  = (id: string, mode: "mono" | "stereo") => engineRequest("setTrackInputMode",  { id, mode });
+export const setTrackOutputMode = (id: string, mode: "mono" | "stereo") => engineRequest("setTrackOutputMode", { id, mode });
 export const setTrackGain   = (id: string, gainDb: number)  => engineRequest("setTrackGain",   { id, gainDb });
 export const setTrackPan    = (id: string, pan: number)     => engineRequest("setTrackPan",    { id, pan });
 export const setTrackMute   = (id: string, mute: boolean)   => engineRequest("setTrackMute",   { id, mute });
@@ -34,6 +37,8 @@ export const addBus       = (id: string, name: string, outL: number, outR: numbe
   engineRequest("addBus", { id, name, outL, outR });
 export const removeBus    = (id: string) => engineRequest("removeBus", { id });
 export const setBusOutput = (id: string, outL: number, outR: number) => engineRequest("setBusOutput", { id, outL, outR });
+export const setBusDest   = (id: string, dest: "bus" | "out")        => engineRequest("setBusDest",   { id, dest });
+export const setBusOutputMode = (id: string, mode: "mono" | "stereo") => engineRequest("setBusOutputMode", { id, mode });
 export const setBusGain   = (id: string, gainDb: number) => engineRequest("setBusGain", { id, gainDb });
 export const setBusPan    = (id: string, pan: number)    => engineRequest("setBusPan",  { id, pan });
 export const setBusMute   = (id: string, mute: boolean)  => engineRequest("setBusMute", { id, mute });
@@ -91,10 +96,17 @@ export const isEngineCrashedError = (e: unknown) =>
 export const restartEngine = () => invoke<void>("restart_engine");
 
 // ---------- presets ----------
-export const listPresets   = () => invoke<string[]>("list_presets");
+// Names are forward-slash relative paths like "Artists/Rabea/Lead 1". The
+// backend creates intermediate folders on save and walks the tree on list.
+export interface PresetListing { presets: string[]; folders: string[]; }
+export const listPresets   = () => invoke<PresetListing>("list_presets");
 export const savePresetFs  = (name: string, data: Preset) => invoke("save_preset", { name, data });
 export const loadPresetFs  = (name: string) => invoke<Preset>("load_preset", { name });
 export const deletePresetFs = (name: string) => invoke("delete_preset", { name });
+export const createPresetFolder = (path: string) => invoke("create_preset_folder", { path });
+export const deletePresetFolder = (path: string) => invoke("delete_preset_folder", { path });
+export const movePresetFs       = (from: string, to: string) => invoke("move_preset", { from, to });
+export const movePresetFolderFs = (from: string, to: string) => invoke("move_preset_folder", { from, to });
 
 // ---------- user preferences ----------
 export interface UserPrefs {

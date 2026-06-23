@@ -22,10 +22,29 @@ export function Mixer() {
   const {
     ready, setReady, tracks, addTrack, setMeters, setBusMeters, setDeviceInfo,
     setPlugins, scan, setScan, numActiveInputs, presetLoading,
-    buses, addBus, moveTrack,
+    buses, addBus, moveTrack, setRoundTripLatencySamples,
   } = useAppStore();
   const [pickerTarget, setPickerTarget] = useState<PickerTarget | null>(null);
   const recovering = useAppStore((s) => s.recovering);
+  const sampleRate = useAppStore((s) => s.sampleRate);
+  const bufferSize = useAppStore((s) => s.bufferSize);
+  const inputLatencySamples = useAppStore((s) => s.inputLatencySamples);
+  const outputLatencySamples = useAppStore((s) => s.outputLatencySamples);
+  const roundTripLatencySamples = useAppStore((s) => s.roundTripLatencySamples);
+  // The engine publishes the true round-trip sample count on every meter tick:
+  // device input + worst-case plugin chain + device output. Falls back to a
+  // buffer-period estimate only if the driver reports no device latency at all
+  // (rare; happens with some bridge drivers).
+  const latencyMs = sampleRate > 0
+    ? (roundTripLatencySamples > 0
+        ? roundTripLatencySamples / sampleRate * 1000
+        : (2 * bufferSize / sampleRate) * 1000)
+    : 0;
+  const latencyMeasured = roundTripLatencySamples > 0;
+  const pluginLatencySamples = Math.max(
+    0,
+    roundTripLatencySamples - inputLatencySamples - outputLatencySamples,
+  );
   const initialized = useRef(false);
   const scanStarted = useRef(false);
   // Lets the crash handler `await` the next engine:ready event so it can
@@ -61,6 +80,13 @@ export function Mixer() {
       const unMeters = await engine.onMeters((m) => {
         setMeters(m.tracks);
         if (m.buses) setBusMeters(m.buses);
+        if (typeof m.roundTripLatencySamples === "number") {
+          setRoundTripLatencySamples(m.roundTripLatencySamples);
+        }
+        // Sample rate can drift via setDevice from elsewhere — keep it fresh.
+        if (typeof m.sampleRate === "number" && m.sampleRate > 0) {
+          setDeviceInfo({ sampleRate: m.sampleRate });
+        }
       });
       unlistens.push(unMeters);
 
@@ -172,6 +198,8 @@ export function Mixer() {
       bufferSize: info.bufferSize || 128,
       numActiveInputs: info.numActiveInputs,
       numActiveOutputs: info.numActiveOutputs,
+      inputLatencySamples: info.inputLatencySamples ?? 0,
+      outputLatencySamples: info.outputLatencySamples ?? 0,
     });
   };
 
@@ -196,6 +224,8 @@ export function Mixer() {
         currentInput: prefs.input, currentOutput: output,
         sampleRate: r.sampleRate, bufferSize: r.bufferSize,
         numActiveInputs: r.numActiveInputs, numActiveOutputs: r.numActiveOutputs,
+        inputLatencySamples: r.inputLatencySamples ?? 0,
+        outputLatencySamples: r.outputLatencySamples ?? 0,
       });
     } catch (e) {
       console.warn("applySavedPrefs failed:", e);
@@ -370,6 +400,8 @@ export function Mixer() {
             await engine.setBusGain(tb.id, tb.gainDb);
             await engine.setBusPan(tb.id, tb.pan);
             await engine.setBusMute(tb.id, tb.mute);
+            if (tb.dest && tb.dest !== "bus") await engine.setBusDest(tb.id, tb.dest);
+            if (tb.outputMode && tb.outputMode !== "stereo") await engine.setBusOutputMode(tb.id, tb.outputMode);
             for (let i = 0; i < tb.plugins.length; i++) {
               const sl = tb.plugins[i];
               if (!sl) continue;
@@ -384,8 +416,14 @@ export function Mixer() {
           if (cb.gainDb !== tb.gainDb) await engine.setBusGain(tb.id, tb.gainDb);
           if (cb.pan !== tb.pan)       await engine.setBusPan(tb.id, tb.pan);
           if (cb.mute !== tb.mute)     await engine.setBusMute(tb.id, tb.mute);
-          if (tb.id === MASTER_BUS_ID && (cb.outL !== tb.outL || cb.outR !== tb.outR)) {
+          if (cb.outL !== tb.outL || cb.outR !== tb.outR) {
             await engine.setBusOutput(tb.id, tb.outL, tb.outR);
+          }
+          if ((cb.dest ?? "bus") !== (tb.dest ?? "bus")) {
+            await engine.setBusDest(tb.id, tb.dest ?? "bus");
+          }
+          if ((cb.outputMode ?? "stereo") !== (tb.outputMode ?? "stereo")) {
+            await engine.setBusOutputMode(tb.id, tb.outputMode ?? "stereo");
           }
           await diffPluginSlots(tb.id, cb.plugins, tb.plugins, {
             remove: (slot) => engine.removePluginOnBus(tb.id, slot),
@@ -410,6 +448,9 @@ export function Mixer() {
           try {
             await engine.addTrack(tt.id, tt.name, tt.inputCh, tt.outL, tt.outR);
             if (tt.busId) await engine.setTrackBus(tt.id, tt.busId);
+            if (tt.dest && tt.dest !== "bus") await engine.setTrackDest(tt.id, tt.dest);
+            if (tt.inputMode  && tt.inputMode  !== "mono")   await engine.setTrackInputMode(tt.id,  tt.inputMode);
+            if (tt.outputMode && tt.outputMode !== "stereo") await engine.setTrackOutputMode(tt.id, tt.outputMode);
             await engine.setTrackGain(tt.id, tt.gainDb);
             await engine.setTrackPan(tt.id, tt.pan);
             await engine.setTrackMute(tt.id, tt.mute);
@@ -432,6 +473,9 @@ export function Mixer() {
           if (ct.inputCh !== tt.inputCh)           await engine.setTrackInput(tt.id, tt.inputCh);
           if ((ct.busId || "") !== (tt.busId || "")) await engine.setTrackBus(tt.id, tt.busId || "");
           if (ct.outL !== tt.outL || ct.outR !== tt.outR) await engine.setTrackOutput(tt.id, tt.outL, tt.outR);
+          if ((ct.dest ?? "bus") !== (tt.dest ?? "bus")) await engine.setTrackDest(tt.id, tt.dest ?? "bus");
+          if ((ct.inputMode  ?? "mono")   !== (tt.inputMode  ?? "mono"))   await engine.setTrackInputMode(tt.id,  tt.inputMode  ?? "mono");
+          if ((ct.outputMode ?? "stereo") !== (tt.outputMode ?? "stereo")) await engine.setTrackOutputMode(tt.id, tt.outputMode ?? "stereo");
           await diffPluginSlots(tt.id, ct.plugins, tt.plugins, {
             remove: (slot) => engine.removePlugin(tt.id, slot),
             load:   (slot, pid, state) => engine.loadPlugin(tt.id, slot, pid, state),
@@ -503,12 +547,14 @@ export function Mixer() {
         try {
           const r = await engine.setDevice(
             s.currentInput, s.currentOutput || s.currentInput,
-            s.sampleRate, s.bufferSize, 32,
+            s.sampleRate, s.bufferSize, 0,
           );
           s.setDeviceInfo({
             currentInput: s.currentInput, currentOutput: s.currentOutput || s.currentInput,
             sampleRate: r.sampleRate, bufferSize: r.bufferSize,
             numActiveInputs: r.numActiveInputs, numActiveOutputs: r.numActiveOutputs,
+            inputLatencySamples: r.inputLatencySamples ?? 0,
+            outputLatencySamples: r.outputLatencySamples ?? 0,
           });
         } catch (err) { console.warn("new preset setDevice failed:", err); }
       }
@@ -537,12 +583,14 @@ export function Mixer() {
         try {
           const r = await engine.setDevice(
             s.currentInput, s.currentOutput || s.currentInput,
-            s.sampleRate, s.bufferSize, 32,
+            s.sampleRate, s.bufferSize, 0,
           );
           s.setDeviceInfo({
             currentInput: s.currentInput, currentOutput: s.currentOutput || s.currentInput,
             sampleRate: r.sampleRate, bufferSize: r.bufferSize,
             numActiveInputs: r.numActiveInputs, numActiveOutputs: r.numActiveOutputs,
+            inputLatencySamples: r.inputLatencySamples ?? 0,
+            outputLatencySamples: r.outputLatencySamples ?? 0,
           });
         } catch (e) { console.warn("replay setDevice failed:", e); }
       }
@@ -554,7 +602,14 @@ export function Mixer() {
           await engine.setBusGain(b.id, b.gainDb);
           await engine.setBusPan(b.id, b.pan);
           await engine.setBusMute(b.id, b.mute);
-          if (b.id === MASTER_BUS_ID) await engine.setBusOutput(b.id, b.outL, b.outR);
+          // Always restore the output pair — sub-buses may now use it for direct routing.
+          await engine.setBusOutput(b.id, b.outL, b.outR);
+          if (b.id !== MASTER_BUS_ID && b.dest && b.dest !== "bus") {
+            await engine.setBusDest(b.id, b.dest);
+          }
+          if (b.outputMode && b.outputMode !== "stereo") {
+            await engine.setBusOutputMode(b.id, b.outputMode);
+          }
           for (let slotIdx = 0; slotIdx < b.plugins.length; slotIdx++) {
             const slot = b.plugins[slotIdx];
             if (!slot) continue;
@@ -576,6 +631,9 @@ export function Mixer() {
         try {
           await engine.addTrack(t.id, t.name, t.inputCh, t.outL, t.outR);
           if (t.busId) await engine.setTrackBus(t.id, t.busId);
+          if (t.dest && t.dest !== "bus") await engine.setTrackDest(t.id, t.dest);
+          if (t.inputMode  && t.inputMode  !== "mono")   await engine.setTrackInputMode(t.id,  t.inputMode);
+          if (t.outputMode && t.outputMode !== "stereo") await engine.setTrackOutputMode(t.id, t.outputMode);
           await engine.setTrackGain(t.id, t.gainDb);
           await engine.setTrackPan(t.id, t.pan);
           await engine.setTrackMute(t.id, t.mute);
@@ -675,6 +733,16 @@ export function Mixer() {
           )}
           <div className={`shrink-0 whitespace-nowrap text-xs ${recovering ? "text-amber-500" : ready ? "text-emerald-500" : "text-amber-500"}`}>
             {recovering ? "○ Recovering…" : ready ? "● Ready" : "○ Booting…"}
+          </div>
+          <div
+            className="shrink-0 whitespace-nowrap rounded border border-border bg-secondary/40 px-2 py-1 font-mono text-xs text-muted-foreground"
+            title={
+              latencyMeasured
+                ? `Round-trip: ${inputLatencySamples} in + ${pluginLatencySamples} plugins + ${outputLatencySamples} out samples @ ${sampleRate} Hz`
+                : `Estimate (device didn't report latency): 2 × ${bufferSize} samples / ${sampleRate} Hz`
+            }
+          >
+            {ready ? `${latencyMs.toFixed(1)} ms${latencyMeasured ? "" : "*"}` : "— ms"}
           </div>
           <SettingsDialog
             scanActive={scan.active}

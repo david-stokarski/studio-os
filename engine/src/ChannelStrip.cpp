@@ -120,6 +120,18 @@ int ChannelStrip::getNumActivePlugins() const noexcept
     return n;
 }
 
+int ChannelStrip::getChainLatencySamples() const noexcept
+{
+    int total = 0;
+    for (int i = 0; i < MAX_PLUGINS; ++i)
+    {
+        if (bypassedSlots[(size_t) i].load()) continue;
+        if (auto* p = ownedSlots[(size_t) i].get())
+            total += juce::jmax(0, p->getLatencySamples());
+    }
+    return total;
+}
+
 void ChannelStrip::process(const float* inSamples, float* outL, float* outR, int numSamples)
 {
     // Hot-swap pending → active for any slot whose version changed.
