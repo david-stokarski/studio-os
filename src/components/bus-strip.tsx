@@ -10,7 +10,7 @@ import { LevelMeter } from "@/components/level-meter";
 import { useAppStore } from "@/lib/store";
 import * as engine from "@/lib/engine";
 import { FADER_MIN_DB, linearToDb } from "@/lib/utils";
-import { VolumeX, Plus, X, Trash2, Power, LogOut } from "lucide-react";
+import { VolumeX, Plus, X, Trash2, Power } from "lucide-react";
 import type { Bus } from "@/lib/types";
 import { MAX_PLUGINS_PER_BUS } from "@/lib/types";
 
@@ -75,6 +75,36 @@ export function BusStripView({ bus, onPickPlugin, isMaster = false }: Props) {
     engine.setBusOutput(bus.id, l, r);
   }, [bus.id, patchBus]);
 
+  // Unified routing dropdown for sub-buses. Values:
+  //   "bus:__master__" → sum into master (default)
+  //   "out:<L>,<R>"    → direct to physical output pair, bypassing master
+  const changeRoute = useCallback((v: string) => {
+    if (v.startsWith("out:")) {
+      const [l, r] = v.slice(4).split(",").map(Number);
+      patchBus(bus.id, { dest: "out", outL: l, outR: r });
+      void engine.setBusOutput(bus.id, l, r);
+      void engine.setBusDest(bus.id, "out");
+      return;
+    }
+    // The only non-"out" option for a sub-bus is master.
+    patchBus(bus.id, { dest: "bus" });
+    void engine.setBusDest(bus.id, "bus");
+  }, [bus.id, patchBus]);
+
+  const toggleOutputMode = useCallback(() => {
+    const next = bus.outputMode === "mono" ? "stereo" : "mono";
+    let { outL, outR } = bus;
+    if (next === "stereo") {
+      if (outL % 2 !== 0) outL = Math.max(0, outL - 1);
+      outR = outL + 1;
+    } else {
+      outR = outL;
+    }
+    patchBus(bus.id, { outputMode: next, outL, outR });
+    void engine.setBusOutputMode(bus.id, next);
+    void engine.setBusOutput(bus.id, outL, outR);
+  }, [bus, patchBus]);
+
   const onRemove = useCallback(async () => {
     const routedCount = tracks.filter((t) => t.busId === bus.id).length;
     const msg = routedCount > 0
@@ -116,10 +146,19 @@ export function BusStripView({ bus, onPickPlugin, isMaster = false }: Props) {
     onPickPlugin(bus.id, slot);
   };
 
-  const outputPairs: Array<[number, number]> = [];
+  const monoOut = bus.outputMode === "mono";
   const nOuts = Math.max(numActiveOutputs, 2);
-  for (let i = 0; i + 1 < nOuts; i += 2) outputPairs.push([i, i + 1]);
-  if (outputPairs.length === 0) outputPairs.push([0, 1]);
+  // Mono → single channels; stereo → adjacent pairs. The same shape is shared
+  // by the master output picker and the sub-bus "Out N…" route entries.
+  const outOptions: Array<{ l: number; r: number; label: string; value: string }> = [];
+  if (monoOut) {
+    for (let i = 0; i < nOuts; i++)
+      outOptions.push({ l: i, r: i, label: `${i + 1}`, value: `${i},${i}` });
+  } else {
+    for (let i = 0; i + 1 < nOuts; i += 2)
+      outOptions.push({ l: i, r: i + 1, label: `${i + 1}/${i + 2}`, value: `${i},${i + 1}` });
+    if (outOptions.length === 0) outOptions.push({ l: 0, r: 1, label: "1/2", value: "0,1" });
+  }
 
   // Master sums every track + every sub-bus. Sub-buses sum only their assigned tracks.
   const routedCount = isMaster
@@ -240,25 +279,52 @@ export function BusStripView({ bus, onPickPlugin, isMaster = false }: Props) {
         </>
       )}
 
-      {/* Output routing — only the master bus picks physical output channels. */}
-      {isMaster && (
-        <div className="flex items-center gap-1">
-          <LogOut className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
+      {/* Output routing. Master always picks a physical output (pair or single
+          channel in mono); sub-buses can choose master OR a physical target.
+          Leading M/S chip toggles mono ↔ stereo. */}
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={toggleOutputMode}
+          className="flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded text-[9px] font-bold uppercase text-muted-foreground hover:bg-secondary hover:text-foreground"
+          title={`Output: ${monoOut ? "mono" : "stereo"} (click to toggle)`}
+        >
+          {monoOut ? "M" : "S"}
+        </button>
+        {isMaster ? (
           <Select value={`${bus.outL},${bus.outR}`} onValueChange={changeOutput}>
             <SelectTrigger
               className="h-6 min-w-0 flex-1 rounded-none border-0 bg-transparent px-0 text-[11px] shadow-none focus:ring-0 focus:ring-offset-0 [&>svg]:hidden"
-              title="Output pair"
+              title={monoOut ? "Output channel" : "Output pair"}
             >
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {outputPairs.map(([l, r]) => (
-                <SelectItem key={`${l},${r}`} value={`${l},${r}`}>{`${l + 1}/${r + 1}`}</SelectItem>
+              {outOptions.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
-        </div>
-      )}
+        ) : (
+          <Select
+            value={bus.dest === "out" ? `out:${bus.outL},${bus.outR}` : "bus:__master__"}
+            onValueChange={changeRoute}
+          >
+            <SelectTrigger
+              className="h-6 min-w-0 flex-1 rounded-none border-0 bg-transparent px-0 text-[11px] shadow-none focus:ring-0 focus:ring-offset-0 [&>svg]:hidden"
+              title="Route to"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="bus:__master__">Master</SelectItem>
+              {outOptions.map((o) => (
+                <SelectItem key={`out:${o.value}`} value={`out:${o.value}`}>{`Out ${o.label}`}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+      </div>
 
       {/* Plugin chain */}
       <div className="flex flex-1 min-h-[80px] flex-col gap-1">

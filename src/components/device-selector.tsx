@@ -9,7 +9,9 @@ import { RefreshCw } from "lucide-react";
 
 const SAMPLE_RATES = [44100, 48000, 88200, 96000];
 const BUFFER_SIZES = [32, 64, 128, 256, 512, 1024];
-const MAX_INPUT_CHANNELS = 32;
+// 0 = "open every input the device advertises". The engine clamps to the
+// device's actual channel count, so a wide-open request is safe.
+const MAX_INPUT_CHANNELS = 0;
 
 export function DeviceSelector() {
   const {
@@ -35,6 +37,8 @@ export function DeviceSelector() {
       currentInput: info.currentInput, currentOutput: info.currentOutput,
       sampleRate: info.sampleRate || 48000, bufferSize: info.bufferSize || 128,
       numActiveInputs: info.numActiveInputs, numActiveOutputs: info.numActiveOutputs,
+      inputLatencySamples: info.inputLatencySamples ?? 0,
+      outputLatencySamples: info.outputLatencySamples ?? 0,
     });
   };
 
@@ -46,6 +50,8 @@ export function DeviceSelector() {
         currentInput: pendingInput, currentOutput: pendingOutput || pendingInput,
         sampleRate: r.sampleRate, bufferSize: r.bufferSize,
         numActiveInputs: r.numActiveInputs, numActiveOutputs: r.numActiveOutputs,
+        inputLatencySamples: r.inputLatencySamples ?? 0,
+        outputLatencySamples: r.outputLatencySamples ?? 0,
       });
       try {
         await engine.savePrefs({

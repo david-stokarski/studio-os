@@ -38,9 +38,16 @@ interface AppState {
   bufferSize: number;
   numActiveInputs: number;
   numActiveOutputs: number;
+  inputLatencySamples: number;
+  outputLatencySamples: number;
+  // Live round-trip latency in samples for the worst-case signal path,
+  // published by the engine on every meter tick. Includes plugin chain latency,
+  // so this updates immediately when plugins are added/removed/bypassed.
+  roundTripLatencySamples: number;
+  setRoundTripLatencySamples: (n: number) => void;
 
   setDeviceInfo: (i: Partial<Pick<AppState,
-    "inputs" | "outputs" | "currentInput" | "currentOutput" | "sampleRate" | "bufferSize" | "numActiveInputs" | "numActiveOutputs">>) => void;
+    "inputs" | "outputs" | "currentInput" | "currentOutput" | "sampleRate" | "bufferSize" | "numActiveInputs" | "numActiveOutputs" | "inputLatencySamples" | "outputLatencySamples">>) => void;
 
   tracks: Track[];
   setTracks: (t: Track[]) => void;
@@ -150,6 +157,9 @@ export const defaultTrack = (id: string, name: string, inputCh: number): Track =
   solo: false,
   plugins: Array.from({ length: MAX_PLUGINS_PER_TRACK }, () => null),
   busId: "",
+  dest: "bus",
+  inputMode: "mono",
+  outputMode: "stereo",
 });
 
 export const defaultBus = (id: string, name: string): Bus => ({
@@ -160,6 +170,10 @@ export const defaultBus = (id: string, name: string): Bus => ({
   gainDb: 0,
   pan: 0,
   mute: false,
+  // Master is the terminal stage — always "out". Sub-buses default to "bus"
+  // (summing into master) and can be flipped to "out" for direct routing.
+  dest: id === "master" ? "out" : "bus",
+  outputMode: "stereo",
   plugins: Array.from({ length: MAX_PLUGINS_PER_BUS }, () => null),
 });
 
@@ -175,6 +189,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   bufferSize: 128,
   numActiveInputs: 0,
   numActiveOutputs: 0,
+  inputLatencySamples: 0,
+  outputLatencySamples: 0,
+  roundTripLatencySamples: 0,
+  setRoundTripLatencySamples: (n) => set({ roundTripLatencySamples: n }),
 
   setDeviceInfo: (i) => set((s) => ({ ...s, ...i })),
 

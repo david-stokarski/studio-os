@@ -10,7 +10,7 @@ import { LevelMeter } from "@/components/level-meter";
 import { useAppStore } from "@/lib/store";
 import * as engine from "@/lib/engine";
 import { FADER_MIN_DB, linearToDb } from "@/lib/utils";
-import { VolumeX, Plus, X, Trash2, Power, GripVertical, LogIn, LogOut } from "lucide-react";
+import { VolumeX, Plus, X, Trash2, Power, GripVertical } from "lucide-react";
 import type { Track } from "@/lib/types";
 import { MAX_PLUGINS_PER_TRACK, MASTER_BUS_ID } from "@/lib/types";
 
@@ -46,7 +46,7 @@ function peakDbText(linear: number): string {
 }
 
 export function TrackStripView({ track, onPickPlugin, onReorder }: Props) {
-  const { patchTrack, removeTrack, meters, numActiveInputs, buses } = useAppStore();
+  const { patchTrack, removeTrack, meters, numActiveInputs, numActiveOutputs, buses } = useAppStore();
   // Track-strip drag state lives in the store so all strips can render the
   // current drop indicator without prop-drilling.
   const dragState    = useAppStore((s) => s.dragState);
@@ -81,10 +81,50 @@ export function TrackStripView({ track, onPickPlugin, onReorder }: Props) {
     patchTrack(track.id, { inputCh: ch });
     engine.setTrackInput(track.id, ch);
   }, [track.id, patchTrack]);
-  const changeBus = useCallback((v: string) => {
-    const next = v === "__master__" ? "" : v;
-    patchTrack(track.id, { busId: next });
-    engine.setTrackBus(track.id, next);
+
+  const toggleInputMode = useCallback(() => {
+    const next = track.inputMode === "stereo" ? "mono" : "stereo";
+    // When flipping to stereo, snap inputCh to an even channel so the pair
+    // (inputCh, inputCh+1) lines up with the conventional 1/2, 3/4, … layout.
+    let nextCh = track.inputCh;
+    if (next === "stereo" && nextCh % 2 !== 0) nextCh = Math.max(0, nextCh - 1);
+    patchTrack(track.id, { inputMode: next, inputCh: nextCh });
+    void engine.setTrackInputMode(track.id, next);
+    if (nextCh !== track.inputCh) void engine.setTrackInput(track.id, nextCh);
+  }, [track.id, track.inputMode, track.inputCh, patchTrack]);
+
+  const toggleOutputMode = useCallback(() => {
+    const next = track.outputMode === "stereo" ? "mono" : "stereo";
+    // For stereo, ensure outL/outR are an adjacent pair starting on an even
+    // channel; for mono, collapse outR onto outL (engine ignores outR anyway).
+    let { outL, outR } = track;
+    if (next === "stereo") {
+      if (outL % 2 !== 0) outL = Math.max(0, outL - 1);
+      outR = outL + 1;
+    } else {
+      outR = outL;
+    }
+    patchTrack(track.id, { outputMode: next, outL, outR });
+    void engine.setTrackOutputMode(track.id, next);
+    if (track.dest === "out") void engine.setTrackOutput(track.id, outL, outR);
+  }, [track, patchTrack]);
+  // Unified routing dropdown. Values:
+  //   "bus:__master__" → route to master bus
+  //   "bus:<busId>"    → route to specific sub-bus
+  //   "out:<L>,<R>"    → direct to physical output pair
+  const changeRoute = useCallback((v: string) => {
+    if (v.startsWith("out:")) {
+      const [l, r] = v.slice(4).split(",").map(Number);
+      patchTrack(track.id, { dest: "out", outL: l, outR: r });
+      void engine.setTrackOutput(track.id, l, r);
+      void engine.setTrackDest(track.id, "out");
+      return;
+    }
+    const busId = v.startsWith("bus:") ? v.slice(4) : v;
+    const next = busId === "__master__" ? "" : busId;
+    patchTrack(track.id, { dest: "bus", busId: next });
+    void engine.setTrackBus(track.id, next);
+    void engine.setTrackDest(track.id, "bus");
   }, [track.id, patchTrack]);
   const onRemove = useCallback(async () => {
     if (!confirm(`Delete track "${track.name}"?`)) return;
@@ -135,8 +175,35 @@ export function TrackStripView({ track, onPickPlugin, onReorder }: Props) {
     }
   };
 
-  const inputOptions = Array.from({ length: Math.max(numActiveInputs, 1) }, (_, i) => i);
+  const stereoIn = track.inputMode === "stereo";
+  const monoOut  = track.outputMode === "mono";
+  // Input choices: mono → every channel; stereo → adjacent pairs.
+  const nIns = Math.max(numActiveInputs, 1);
+  const inputOptions: Array<{ value: number; label: string }> = [];
+  if (stereoIn) {
+    for (let i = 0; i + 1 < nIns; i += 2)
+      inputOptions.push({ value: i, label: `Ch ${i + 1}/${i + 2}` });
+    if (inputOptions.length === 0) inputOptions.push({ value: 0, label: "Ch 1/2" });
+  } else {
+    for (let i = 0; i < nIns; i++)
+      inputOptions.push({ value: i, label: `Ch ${i + 1}` });
+  }
   const subBuses = buses.filter((b) => b.id !== MASTER_BUS_ID);
+  // Output choices for the "out:…" entries — mono → single channels, stereo → pairs.
+  const nOuts = Math.max(numActiveOutputs, 2);
+  const outOptions: Array<{ l: number; r: number; label: string; key: string }> = [];
+  if (monoOut) {
+    for (let i = 0; i < nOuts; i++)
+      outOptions.push({ l: i, r: i, label: `Out ${i + 1}`, key: `out:${i},${i}` });
+  } else {
+    for (let i = 0; i + 1 < nOuts; i += 2)
+      outOptions.push({ l: i, r: i + 1, label: `Out ${i + 1}/${i + 2}`, key: `out:${i},${i + 1}` });
+    if (outOptions.length === 0) outOptions.push({ l: 0, r: 1, label: "Out 1/2", key: "out:0,1" });
+  }
+  // Selected value for the unified dropdown, derived from track.dest/busId/outL/R.
+  const routeValue = track.dest === "out"
+    ? `out:${track.outL},${track.outR}`
+    : `bus:${!track.busId || track.busId === MASTER_BUS_ID ? "__master__" : track.busId}`;
 
   // --- track reorder (grip handle, store-backed drag state) ---
   const stripRef = useRef<HTMLDivElement>(null);
@@ -322,10 +389,16 @@ export function TrackStripView({ track, onPickPlugin, onReorder }: Props) {
         </Button>
       </div>
 
-      {/* Routing dropdowns — no labels */}
-      {/* Input channel — LogIn icon hints at "audio enters here". */}
+      {/* Routing dropdowns — leading M/S chip toggles mono ↔ stereo. */}
       <div className="flex items-center gap-1">
-        <LogIn className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
+        <button
+          type="button"
+          onClick={toggleInputMode}
+          className="flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded text-[9px] font-bold uppercase text-muted-foreground hover:bg-secondary hover:text-foreground"
+          title={`Input: ${stereoIn ? "stereo" : "mono"} (click to toggle)`}
+        >
+          {stereoIn ? "S" : "M"}
+        </button>
         <Select value={String(track.inputCh)} onValueChange={changeInput}>
           <SelectTrigger
             className="h-6 min-w-0 flex-1 rounded-none border-0 bg-transparent px-0 text-[11px] shadow-none focus:ring-0 focus:ring-offset-0 [&>svg]:hidden"
@@ -334,19 +407,22 @@ export function TrackStripView({ track, onPickPlugin, onReorder }: Props) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {inputOptions.map((i) => (
-              <SelectItem key={i} value={String(i)}>{`Ch ${i + 1}`}</SelectItem>
+            {inputOptions.map((o) => (
+              <SelectItem key={o.value} value={String(o.value)}>{o.label}</SelectItem>
             ))}
           </SelectContent>
         </Select>
       </div>
-      {/* Routing target — LogOut icon hints at "audio leaves through here". */}
       <div className="flex items-center gap-1">
-        <LogOut className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden />
-        <Select
-          value={!track.busId || track.busId === MASTER_BUS_ID ? "__master__" : track.busId}
-          onValueChange={changeBus}
+        <button
+          type="button"
+          onClick={toggleOutputMode}
+          className="flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded text-[9px] font-bold uppercase text-muted-foreground hover:bg-secondary hover:text-foreground"
+          title={`Output: ${monoOut ? "mono" : "stereo"} (click to toggle)`}
         >
+          {monoOut ? "M" : "S"}
+        </button>
+        <Select value={routeValue} onValueChange={changeRoute}>
           <SelectTrigger
             className="h-6 min-w-0 flex-1 rounded-none border-0 bg-transparent px-0 text-[11px] shadow-none focus:ring-0 focus:ring-offset-0 [&>svg]:hidden"
             title="Route to"
@@ -354,9 +430,12 @@ export function TrackStripView({ track, onPickPlugin, onReorder }: Props) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__master__">Master</SelectItem>
+            <SelectItem value="bus:__master__">Master</SelectItem>
             {subBuses.map((b) => (
-              <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+              <SelectItem key={b.id} value={`bus:${b.id}`}>{b.name}</SelectItem>
+            ))}
+            {outOptions.map((o) => (
+              <SelectItem key={o.key} value={o.key}>{o.label}</SelectItem>
             ))}
           </SelectContent>
         </Select>

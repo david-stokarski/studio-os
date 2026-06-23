@@ -132,6 +132,8 @@ juce::var IpcServer::handleCommand(const juce::String& cmd, const juce::var& arg
         o->setProperty("bufferSize", engine.getCurrentBufferSize());
         o->setProperty("numActiveInputs", engine.getNumActiveInputs());
         o->setProperty("numActiveOutputs", engine.getNumActiveOutputs());
+        o->setProperty("inputLatencySamples", engine.getInputLatencySamples());
+        o->setProperty("outputLatencySamples", engine.getOutputLatencySamples());
         return juce::var(o);
     }
     if (cmd == "setAudioDevice")
@@ -152,6 +154,8 @@ juce::var IpcServer::handleCommand(const juce::String& cmd, const juce::var& arg
         o->setProperty("bufferSize", engine.getCurrentBufferSize());
         o->setProperty("numActiveInputs", engine.getNumActiveInputs());
         o->setProperty("numActiveOutputs", engine.getNumActiveOutputs());
+        o->setProperty("inputLatencySamples", engine.getInputLatencySamples());
+        o->setProperty("outputLatencySamples", engine.getOutputLatencySamples());
         return juce::var(o);
     }
     if (cmd == "addTrack")
@@ -168,6 +172,9 @@ juce::var IpcServer::handleCommand(const juce::String& cmd, const juce::var& arg
     if (cmd == "setTrackInput")   { engine.setTrackInput(args["id"].toString(), (int) args["inputCh"]); return juce::var(true); }
     if (cmd == "setTrackOutput")  { engine.setTrackOutput(args["id"].toString(), (int) args["outL"], (int) args["outR"]); return juce::var(true); }
     if (cmd == "setTrackBus")     { engine.setTrackBus(args["id"].toString(), args["busId"].toString()); return juce::var(true); }
+    if (cmd == "setTrackDest")    { engine.setTrackDest(args["id"].toString(), args["dest"].toString()); return juce::var(true); }
+    if (cmd == "setTrackInputMode")  { engine.setTrackInputMode(args["id"].toString(),  args["mode"].toString()); return juce::var(true); }
+    if (cmd == "setTrackOutputMode") { engine.setTrackOutputMode(args["id"].toString(), args["mode"].toString()); return juce::var(true); }
     if (cmd == "setTrackGain")    { engine.setTrackGainDb(args["id"].toString(), (float) (double) args["gainDb"]); return juce::var(true); }
     if (cmd == "setTrackPan")     { engine.setTrackPan(args["id"].toString(), (float) (double) args["pan"]); return juce::var(true); }
     if (cmd == "setTrackMute")    { engine.setTrackMute(args["id"].toString(), (bool) args["mute"]); return juce::var(true); }
@@ -183,6 +190,8 @@ juce::var IpcServer::handleCommand(const juce::String& cmd, const juce::var& arg
     }
     if (cmd == "removeBus")    { engine.removeBus(args["id"].toString()); return juce::var(true); }
     if (cmd == "setBusOutput") { engine.setBusOutput(args["id"].toString(), (int) args["outL"], (int) args["outR"]); return juce::var(true); }
+    if (cmd == "setBusDest")   { engine.setBusDest(args["id"].toString(), args["dest"].toString()); return juce::var(true); }
+    if (cmd == "setBusOutputMode") { engine.setBusOutputMode(args["id"].toString(), args["mode"].toString()); return juce::var(true); }
     if (cmd == "setBusGain")   { engine.setBusGainDb(args["id"].toString(), (float) (double) args["gainDb"]); return juce::var(true); }
     if (cmd == "setBusPan")    { engine.setBusPan(args["id"].toString(), (float) (double) args["pan"]); return juce::var(true); }
     if (cmd == "setBusMute")   { engine.setBusMute(args["id"].toString(), (bool) args["mute"]); return juce::var(true); }
@@ -323,5 +332,9 @@ void IpcServer::timerCallback()
     auto* root = new juce::DynamicObject();
     root->setProperty("tracks", arr);
     root->setProperty("buses",  busArr);
+    // Latency reported on every tick so the UI updates immediately when plugins
+    // are added/removed/bypassed — no separate event needed.
+    root->setProperty("roundTripLatencySamples", engine.getRoundTripLatencySamples());
+    root->setProperty("sampleRate", engine.getCurrentSampleRate());
     emitEvent("meters", juce::var(root));
 }

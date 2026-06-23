@@ -50,6 +50,9 @@ public:
     juce::AudioPluginInstance* getPluginAt(int slot) const noexcept;
     int getNumActivePlugins() const noexcept;
     int getMaxPlugins() const noexcept { return MAX_PLUGINS; }
+    // Sum of getLatencySamples() across non-bypassed plugins in the chain.
+    // Used by the engine to compute true round-trip latency.
+    int getChainLatencySamples() const noexcept;
 
     void setSlotBypassed(int slot, bool b) noexcept
     {

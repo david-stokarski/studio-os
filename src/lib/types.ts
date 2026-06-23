@@ -7,6 +7,8 @@ export interface AudioDevicesInfo {
   bufferSize: number;
   numActiveInputs: number;
   numActiveOutputs: number;
+  inputLatencySamples: number;
+  outputLatencySamples: number;
 }
 
 export interface PluginDescriptor {
@@ -36,6 +38,17 @@ export const MAX_PLUGINS_PER_BUS = 32;
 // the right of the mixer.
 export const MASTER_BUS_ID = "master";
 
+// Routing destination for a track or sub-bus.
+//   "bus" — route through busId (for tracks) or sum into master (for sub-buses).
+//   "out" — write directly to the physical output pair (outL/outR), bypassing
+//           any bus / master plugin chain.
+// Master is implicitly always "out" regardless of its stored value.
+export type RouteDest = "bus" | "out";
+// Per-strip channel mode. "mono" = single channel; "stereo" = adjacent pair.
+// Track inputs: mono reads inputCh, stereo reads inputCh + inputCh+1.
+// Track/bus outputs: mono folds the strip's stereo result and writes to outL only.
+export type ChannelMode = "mono" | "stereo";
+
 export interface Track {
   id: string;
   name: string;
@@ -50,6 +63,12 @@ export interface Track {
   plugins: (PluginSlot | null)[];
   // Empty string (or undefined) routes to master output. Otherwise the bus id this track feeds.
   busId?: string;
+  // Routing destination (default "bus"). When "out", outL/outR are the
+  // physical output pair the track writes to directly.
+  dest?: RouteDest;
+  // Channel modes (defaults: mono in, stereo out).
+  inputMode?: ChannelMode;
+  outputMode?: ChannelMode;
 }
 
 export interface Bus {
@@ -61,11 +80,19 @@ export interface Bus {
   pan: number;
   mute: boolean;
   plugins: (PluginSlot | null)[];
+  // Routing destination (default "bus" for sub-buses, "out" for master).
+  dest?: RouteDest;
+  // Output mode (default "stereo"). When "mono" the bus folds L+R into outL.
+  outputMode?: ChannelMode;
 }
 
 export interface MeterFrame {
   tracks: { id: string; in: number; outL: number; outR: number; monitoring: boolean }[];
   buses?: { id: string; inL: number; inR: number; outL: number; outR: number }[];
+  // True round-trip latency in samples (device ADC + plugin chain + DAC) for
+  // the worst-case route across tracks. Updates live as plugins change.
+  roundTripLatencySamples?: number;
+  sampleRate?: number;
 }
 
 export interface Preset {

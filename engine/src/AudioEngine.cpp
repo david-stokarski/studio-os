@@ -92,19 +92,47 @@ juce::String AudioEngine::setAudioDevice(const juce::String& inputName,
 {
     deviceManager->removeAudioCallback(this);
 
+    const auto resolvedOutputName = outputName.isEmpty() ? inputName : outputName;
+
+    // Discover the device's true channel counts before opening. JUCE's
+    // useDefault*Channels=true only opens the first stereo pair, which is
+    // exactly what we don't want for multi-channel interfaces. Building a
+    // temp device via the type lets us query channel counts without taking
+    // the device, so we can open with a precise full-coverage mask in one go.
+    int deviceInputChannels  = juce::jmax(1, numInputChannels);
+    int deviceOutputChannels = 2;
+    for (auto* t : getDeviceTypes())
+    {
+        const bool hasIn  = t->getDeviceNames(true).contains(inputName);
+        const bool hasOut = t->getDeviceNames(false).contains(resolvedOutputName);
+        if (! hasIn && ! hasOut) continue;
+        std::unique_ptr<juce::AudioIODevice> probe(
+            t->createDevice(hasOut ? resolvedOutputName : juce::String(),
+                            hasIn  ? inputName          : juce::String()));
+        if (! probe) continue;
+        if (hasIn)  deviceInputChannels  = juce::jmax(deviceInputChannels,  probe->getInputChannelNames().size());
+        if (hasOut) deviceOutputChannels = juce::jmax(deviceOutputChannels, probe->getOutputChannelNames().size());
+        break;
+    }
+    // Honour any explicit caller cap on inputs (passing 0 = "all").
+    if (numInputChannels > 0)
+        deviceInputChannels = juce::jmin(deviceInputChannels, numInputChannels);
+
     juce::AudioDeviceManager::AudioDeviceSetup setup;
     deviceManager->getAudioDeviceSetup(setup);
 
     setup.inputDeviceName  = inputName;
-    setup.outputDeviceName = outputName.isEmpty() ? inputName : outputName;
+    setup.outputDeviceName = resolvedOutputName;
     setup.sampleRate       = sampleRate;
     setup.bufferSize       = bufferSize;
     setup.useDefaultInputChannels  = false;
-    setup.useDefaultOutputChannels = true;
+    setup.useDefaultOutputChannels = false;
 
-    juce::BigInteger inMask;
-    inMask.setRange(0, juce::jmax(1, numInputChannels), true);
-    setup.inputChannels = inMask;
+    juce::BigInteger inMask, outMask;
+    inMask.setRange (0, juce::jmax(1, deviceInputChannels),  true);
+    outMask.setRange(0, juce::jmax(2, deviceOutputChannels), true);
+    setup.inputChannels  = inMask;
+    setup.outputChannels = outMask;
 
     auto err = deviceManager->setAudioDeviceSetup(setup, true);
     if (err.isNotEmpty())
@@ -123,6 +151,8 @@ juce::String AudioEngine::setAudioDevice(const juce::String& inputName,
             b->strip->prepare(sr, bs);
             b->accum.setSize(2, bs, false, true, true);
         }
+        // Pre-size the mono scratch so the audio thread never allocates.
+        monoScratch.setSize(1, bs, false, true, true);
     }
 
     deviceManager->addAudioCallback(this);
@@ -145,6 +175,72 @@ double AudioEngine::getCurrentSampleRate() const { return sr; }
 int    AudioEngine::getCurrentBufferSize() const { return bs; }
 int    AudioEngine::getNumActiveInputs()  const  { return activeInputCount; }
 int    AudioEngine::getNumActiveOutputs() const  { return activeOutputCount; }
+
+int AudioEngine::getInputLatencySamples() const
+{
+    if (auto* dev = deviceManager->getCurrentAudioDevice())
+        return dev->getInputLatencyInSamples();
+    return 0;
+}
+
+int AudioEngine::getOutputLatencySamples() const
+{
+    if (auto* dev = deviceManager->getCurrentAudioDevice())
+        return dev->getOutputLatencyInSamples();
+    return 0;
+}
+
+int AudioEngine::getRoundTripLatencySamples()
+{
+    const int devIn  = getInputLatencySamples();
+    const int devOut = getOutputLatencySamples();
+
+    std::lock_guard<std::mutex> lk(tracksMutex);
+
+    // Build per-bus chain latency + dest lookup.
+    struct BusInfo { juce::String id; int chain; juce::String dest; };
+    int masterChain = 0;
+    std::vector<BusInfo> subBuses;
+    subBuses.reserve(buses.size());
+    for (auto& b : buses)
+    {
+        const int chain = b->strip ? b->strip->getChainLatencySamples() : 0;
+        if (b->id == "master") masterChain = chain;
+        else                   subBuses.push_back({ b->id, chain, b->dest });
+    }
+
+    // Worst-case route across tracks. Each track's contribution depends on
+    // its dest: direct-out → track chain only; bus → + sub-bus chain (if any)
+    // → + master chain (unless the sub-bus is itself direct-out).
+    int worstRoute = masterChain; // baseline = master-only graph
+    for (auto& t : tracks)
+    {
+        const int trackChain = t->strip ? t->strip->getChainLatencySamples() : 0;
+        int route = trackChain;
+        if (t->dest != "out")
+        {
+            int busChain = 0;
+            bool busIsDirect = false;
+            if (t->busId.isNotEmpty() && t->busId != "master")
+            {
+                for (auto& bi : subBuses)
+                    if (bi.id == t->busId) { busChain = bi.chain; busIsDirect = (bi.dest == "out"); break; }
+            }
+            route += busChain;
+            if (! busIsDirect) route += masterChain;
+        }
+        if (route > worstRoute) worstRoute = route;
+    }
+    // Also consider sub-buses without any tracks routed to them — they still
+    // emit silence through their own chain. Cheap to include for completeness.
+    for (auto& bi : subBuses)
+    {
+        const int route = bi.chain + (bi.dest == "out" ? 0 : masterChain);
+        if (route > worstRoute) worstRoute = route;
+    }
+
+    return devIn + devOut + worstRoute;
+}
 
 AudioEngine::Track* AudioEngine::findTrack(const juce::String& id)
 {
@@ -203,6 +299,24 @@ void AudioEngine::setTrackBus(const juce::String& id, const juce::String& busId)
 {
     std::lock_guard<std::mutex> lk(tracksMutex);
     if (auto* t = findTrack(id)) t->busId = busId;
+}
+
+void AudioEngine::setTrackDest(const juce::String& id, const juce::String& dest)
+{
+    std::lock_guard<std::mutex> lk(tracksMutex);
+    if (auto* t = findTrack(id)) t->dest = (dest == "out") ? "out" : "bus";
+}
+
+void AudioEngine::setTrackInputMode(const juce::String& id, const juce::String& mode)
+{
+    std::lock_guard<std::mutex> lk(tracksMutex);
+    if (auto* t = findTrack(id)) t->stereoIn = (mode == "stereo");
+}
+
+void AudioEngine::setTrackOutputMode(const juce::String& id, const juce::String& mode)
+{
+    std::lock_guard<std::mutex> lk(tracksMutex);
+    if (auto* t = findTrack(id)) t->monoOut = (mode == "mono");
 }
 
 void AudioEngine::setTrackGainDb(const juce::String& id, float db)
@@ -270,6 +384,23 @@ void AudioEngine::setBusOutput(const juce::String& id, int outL, int outR)
 {
     std::lock_guard<std::mutex> lk(tracksMutex);
     if (auto* b = findBus(id)) { b->outL = juce::jmax(0, outL); b->outR = juce::jmax(0, outR); }
+}
+
+void AudioEngine::setBusDest(const juce::String& id, const juce::String& dest)
+{
+    std::lock_guard<std::mutex> lk(tracksMutex);
+    if (auto* b = findBus(id))
+    {
+        // Master is always terminal; ignore attempts to make it a sub-bus.
+        if (b->id == "master") { b->dest = "out"; return; }
+        b->dest = (dest == "out") ? "out" : "bus";
+    }
+}
+
+void AudioEngine::setBusOutputMode(const juce::String& id, const juce::String& mode)
+{
+    std::lock_guard<std::mutex> lk(tracksMutex);
+    if (auto* b = findBus(id)) b->monoOut = (mode == "mono");
 }
 
 void AudioEngine::setBusGainDb(const juce::String& id, float db)
@@ -616,85 +747,173 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* inputCha
         b->accum.clear(0, numSamples);
     }
 
-    // Stage B: process each track. Target = assigned sub-bus, else master, else direct out.
+    // Stage B: process each track. Honours four orthogonal modes:
+    //   stereoIn  → read inputCh and inputCh+1 (else mono from inputCh).
+    //   monoOut   → fold strip's stereo result to a single channel.
+    //   dest=out  → write to physical outL/outR (or outL only for monoOut).
+    //   dest=bus  → sum into target bus accumulator (mirrored to both
+    //               channels when monoOut → mono panned center).
+    // ChannelStrip writes additively (outL[i] += …; outR[i] += …), so passing
+    // the same pointer for outL and outR yields an equal-power mono fold for
+    // free; we only need the monoScratch when mono → two destination channels.
     for (auto& t : tracks)
     {
         if (! t) continue;
         const int inCh = t->inputCh;
         if (inCh < 0 || inCh >= numInputChannels) continue;
-        const float* in = inputChannelData[inCh];
-        if (in == nullptr) continue;
+        const float* inL = inputChannelData[inCh];
+        if (inL == nullptr) continue;
 
-        Bus* target = nullptr;
-        if (t->busId.isNotEmpty() && t->busId != "master")
+        const bool stereoIn = t->stereoIn;
+        const float* inR = nullptr;
+        if (stereoIn)
         {
-            for (auto& b : buses)
-                if (b && b->id == t->busId) { target = b.get(); break; }
-        }
-        if (target == nullptr) target = master;
-
-        if (target != nullptr && target->accum.getNumSamples() >= numSamples)
-        {
-            float* outL = target->accum.getWritePointer(0);
-            float* outR = target->accum.getWritePointer(1);
-            t->strip->process(in, outL, outR, numSamples);
-            continue;
+            if (inCh + 1 >= numInputChannels) continue;
+            inR = inputChannelData[inCh + 1];
+            if (inR == nullptr) continue;
         }
 
-        // Fallback path: write straight to physical outputs (only if master missing).
+        const bool monoOut  = t->monoOut;
+        const bool directOut = (t->dest == "out");
+
+        // -------- dest == "bus" --------
+        if (! directOut)
+        {
+            Bus* target = nullptr;
+            if (t->busId.isNotEmpty() && t->busId != "master")
+            {
+                for (auto& b : buses)
+                    if (b && b->id == t->busId) { target = b.get(); break; }
+            }
+            if (target == nullptr) target = master;
+
+            if (target != nullptr && target->accum.getNumSamples() >= numSamples)
+            {
+                float* outL = target->accum.getWritePointer(0);
+                float* outR = target->accum.getWritePointer(1);
+                if (monoOut)
+                {
+                    // Fold to scratch, then mirror to both bus channels (center pan).
+                    if (monoScratch.getNumSamples() < numSamples) continue;
+                    float* scr = monoScratch.getWritePointer(0);
+                    juce::FloatVectorOperations::clear(scr, numSamples);
+                    if (stereoIn) t->strip->processStereo(inL, inR, scr, scr, numSamples);
+                    else          t->strip->process(inL, scr, scr, numSamples);
+                    juce::FloatVectorOperations::add(outL, scr, numSamples);
+                    juce::FloatVectorOperations::add(outR, scr, numSamples);
+                }
+                else
+                {
+                    if (stereoIn) t->strip->processStereo(inL, inR, outL, outR, numSamples);
+                    else          t->strip->process(inL, outL, outR, numSamples);
+                }
+                continue;
+            }
+        }
+
+        // -------- dest == "out" (or bus missing) --------
         const int oL = t->outL;
-        const int oR = t->outR;
         if (oL < 0 || oL >= numOutputChannels) continue;
-        if (oR < 0 || oR >= numOutputChannels) continue;
         float* outL = outputChannelData[oL];
-        float* outR = outputChannelData[oR];
-        if (outL == nullptr || outR == nullptr) continue;
-        t->strip->process(in, outL, outR, numSamples);
+        if (outL == nullptr) continue;
+
+        if (monoOut)
+        {
+            // Same-pointer trick → strip sums L+R into single physical channel.
+            if (stereoIn) t->strip->processStereo(inL, inR, outL, outL, numSamples);
+            else          t->strip->process(inL, outL, outL, numSamples);
+        }
+        else
+        {
+            const int oR = t->outR;
+            if (oR < 0 || oR >= numOutputChannels) continue;
+            float* outR = outputChannelData[oR];
+            if (outR == nullptr) continue;
+            if (stereoIn) t->strip->processStereo(inL, inR, outL, outR, numSamples);
+            else          t->strip->process(inL, outL, outR, numSamples);
+        }
     }
 
-    // Stage C: sub-buses run their plugin chain and sum into master's accumulator.
+    // Stage C: sub-buses. Honours dest + monoOut symmetrically with tracks.
+    // Master is handled separately in Stage D.
     for (auto& b : buses)
     {
         if (! b) continue;
-        if (b->id == "master") continue; // master is processed last
+        if (b->id == "master") continue;
         if (b->accum.getNumSamples() < numSamples) continue;
 
         const float* inL = b->accum.getReadPointer(0);
         const float* inR = b->accum.getReadPointer(1);
 
-        if (master != nullptr && master->accum.getNumSamples() >= numSamples)
+        const bool directOut = (b->dest == "out");
+        const bool monoOut   = b->monoOut;
+
+        // -------- dest == "bus" → sum into master accumulator --------
+        if (! directOut && master != nullptr && master->accum.getNumSamples() >= numSamples)
         {
             float* outL = master->accum.getWritePointer(0);
             float* outR = master->accum.getWritePointer(1);
-            b->strip->processStereo(inL, inR, outL, outR, numSamples);
+            if (monoOut)
+            {
+                if (monoScratch.getNumSamples() < numSamples) continue;
+                float* scr = monoScratch.getWritePointer(0);
+                juce::FloatVectorOperations::clear(scr, numSamples);
+                b->strip->processStereo(inL, inR, scr, scr, numSamples);
+                juce::FloatVectorOperations::add(outL, scr, numSamples);
+                juce::FloatVectorOperations::add(outR, scr, numSamples);
+            }
+            else
+            {
+                b->strip->processStereo(inL, inR, outL, outR, numSamples);
+            }
             continue;
         }
 
-        // Fallback: direct to outputs.
+        // -------- dest == "out" (or master missing) --------
         const int oL = b->outL;
-        const int oR = b->outR;
         if (oL < 0 || oL >= numOutputChannels) continue;
-        if (oR < 0 || oR >= numOutputChannels) continue;
         float* outL = outputChannelData[oL];
-        float* outR = outputChannelData[oR];
-        if (outL == nullptr || outR == nullptr) continue;
-        b->strip->processStereo(inL, inR, outL, outR, numSamples);
+        if (outL == nullptr) continue;
+
+        if (monoOut)
+        {
+            b->strip->processStereo(inL, inR, outL, outL, numSamples);
+        }
+        else
+        {
+            const int oR = b->outR;
+            if (oR < 0 || oR >= numOutputChannels) continue;
+            float* outR = outputChannelData[oR];
+            if (outR == nullptr) continue;
+            b->strip->processStereo(inL, inR, outL, outR, numSamples);
+        }
     }
 
     // Stage D: master runs its plugin chain on the summed mix and writes to physical outs.
     if (master != nullptr && master->accum.getNumSamples() >= numSamples)
     {
         const int oL = master->outL;
-        const int oR = master->outR;
-        if (oL >= 0 && oL < numOutputChannels && oR >= 0 && oR < numOutputChannels)
+        if (oL >= 0 && oL < numOutputChannels)
         {
             float* outL = outputChannelData[oL];
-            float* outR = outputChannelData[oR];
-            if (outL != nullptr && outR != nullptr)
+            if (outL != nullptr)
             {
                 const float* inL = master->accum.getReadPointer(0);
                 const float* inR = master->accum.getReadPointer(1);
-                master->strip->processStereo(inL, inR, outL, outR, numSamples);
+                if (master->monoOut)
+                {
+                    master->strip->processStereo(inL, inR, outL, outL, numSamples);
+                }
+                else
+                {
+                    const int oR = master->outR;
+                    if (oR >= 0 && oR < numOutputChannels)
+                    {
+                        float* outR = outputChannelData[oR];
+                        if (outR != nullptr)
+                            master->strip->processStereo(inL, inR, outL, outR, numSamples);
+                    }
+                }
             }
         }
     }
